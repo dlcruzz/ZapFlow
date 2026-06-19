@@ -1,20 +1,17 @@
+import json
 import sys
 import threading
 import time
 import tkinter as tk
+import webbrowser
 from datetime import datetime
 from pathlib import Path
 from tkinter import messagebox, ttk
 
-
-def _resource(relative: str) -> Path:
-    """Resolve caminho tanto em dev quanto dentro do executável PyInstaller."""
-    base = Path(getattr(sys, "_MEIPASS", Path(__file__).parent))
-    return base / relative
-
 import customtkinter as ctk
 
 import config
+import icons as ic
 from whatsapp_sender import enviar_para, read_contacts, validate_phone
 
 ctk.set_appearance_mode("dark")
@@ -32,6 +29,17 @@ C = {
     "subtext": "#94a3b8",
     "border":  "#334155",
 }
+
+
+def _resource(relative: str) -> Path:
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).parent))
+    return base / relative
+
+
+def _user_data_dir() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).parent
+    return Path(__file__).parent
 
 
 def _style_treeview():
@@ -73,16 +81,10 @@ class StatCard(ctk.CTkFrame):
     def __init__(self, master, title: str, color: str, **kw):
         super().__init__(master, corner_radius=14, fg_color=C["surface"], **kw)
         self.columnconfigure(0, weight=1)
-
-        ctk.CTkLabel(
-            self, text=title,
-            font=("Segoe UI", 11), text_color=C["subtext"]
-        ).grid(row=0, column=0, sticky="w", padx=18, pady=(16, 0))
-
-        self._val = ctk.CTkLabel(
-            self, text="0",
-            font=("Segoe UI", 30, "bold"), text_color=color
+        ctk.CTkLabel(self, text=title, font=("Segoe UI", 11), text_color=C["subtext"]).grid(
+            row=0, column=0, sticky="w", padx=18, pady=(16, 0)
         )
+        self._val = ctk.CTkLabel(self, text="0", font=("Segoe UI", 30, "bold"), text_color=color)
         self._val.grid(row=1, column=0, sticky="w", padx=18, pady=(4, 16))
 
     def set(self, value: str):
@@ -93,7 +95,7 @@ class WhatsAppPanel(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("ZapFlow")
-        self.geometry("1300x820")
+        self.geometry("1300x860")
         self.minsize(1100, 700)
         self.configure(fg_color=C["bg"])
         self._set_icon()
@@ -105,13 +107,19 @@ class WhatsAppPanel(ctk.CTk):
         self.sent_count = 0
         self.failed_count = 0
         self.last_report = "Aguardando início..."
+        self.block_widgets: list[tuple[ctk.CTkFrame, ctk.CTkTextbox]] = []
+
+        self.blocos = self._load_messages()
 
         _style_treeview()
         self._build_ui()
         self.load_contacts_from_csv()
 
+    # ──────────────────────────────────────────────────────────────────────────
+    # Ícone da janela
+    # ──────────────────────────────────────────────────────────────────────────
+
     def _set_icon(self):
-        # Vincula o processo ao ícone do .exe na barra de tarefas do Windows
         if sys.platform == "win32":
             import ctypes
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("zapflow.app")
@@ -127,6 +135,22 @@ class WhatsAppPanel(ctk.CTk):
             self._icon_ref = img
 
     # ──────────────────────────────────────────────────────────────────────────
+    # Mensagens persistidas
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def _messages_path(self) -> Path:
+        return _user_data_dir() / "messages.json"
+
+    def _load_messages(self) -> list[str]:
+        path = self._messages_path()
+        if path.exists():
+            try:
+                return json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+        return list(config.BLOCOS)
+
+    # ──────────────────────────────────────────────────────────────────────────
     # Layout
     # ──────────────────────────────────────────────────────────────────────────
 
@@ -137,38 +161,67 @@ class WhatsAppPanel(ctk.CTk):
         root = ctk.CTkFrame(self, fg_color=C["bg"], corner_radius=0)
         root.grid(row=0, column=0, sticky="nsew", padx=24, pady=24)
         root.columnconfigure(0, weight=1)
-        root.rowconfigure(3, weight=1)
+        root.rowconfigure(1, weight=1)
 
         self._build_header(root)
-        self._build_cards(root)
-        self._build_toolbar(root)
-        self._build_content(root)
+
+        tabs = ctk.CTkTabview(
+            root, corner_radius=14,
+            fg_color=C["surface"],
+            segmented_button_fg_color=C["border"],
+            segmented_button_selected_color=C["accent"],
+            segmented_button_selected_hover_color="#2563eb",
+            segmented_button_unselected_color=C["border"],
+            segmented_button_unselected_hover_color="#475569",
+            segmented_button_selected_fg_color=C["accent"],
+            text_color=C["text"],
+        )
+        tabs.grid(row=1, column=0, sticky="nsew", pady=(16, 0))
+
+        envio_tab = tabs.add("Envio")
+        msg_tab   = tabs.add("Mensagens")
+
+        envio_tab.columnconfigure(0, weight=1)
+        envio_tab.rowconfigure(2, weight=1)
+        self._build_cards(envio_tab)
+        self._build_toolbar(envio_tab)
+        self._build_content(envio_tab)
+
+        msg_tab.columnconfigure(0, weight=1)
+        msg_tab.rowconfigure(1, weight=1)
+        self._build_messages_tab(msg_tab)
+
+        self._build_footer(root)
 
     def _build_header(self, parent):
         header = ctk.CTkFrame(parent, fg_color=C["surface"], corner_radius=14, height=68)
-        header.grid(row=0, column=0, sticky="ew", pady=(0, 18))
-        header.columnconfigure(1, weight=1)
+        header.grid(row=0, column=0, sticky="ew")
+        header.columnconfigure(2, weight=1)
         header.grid_propagate(False)
 
         ctk.CTkLabel(
-            header, text="⚡ ZapFlow",
+            header, image=ic.bolt(24), text="",
+        ).grid(row=0, column=0, padx=(18, 6), sticky="w")
+
+        ctk.CTkLabel(
+            header, text="ZapFlow",
             font=("Segoe UI", 22, "bold"), text_color=C["accent"]
-        ).grid(row=0, column=0, padx=22, sticky="w")
+        ).grid(row=0, column=1, sticky="w")
 
         ctk.CTkLabel(
             header, text="Automação de Envio via WhatsApp",
             font=("Segoe UI", 12), text_color=C["subtext"]
-        ).grid(row=0, column=1, padx=8, sticky="w")
+        ).grid(row=0, column=2, padx=12, sticky="w")
 
-        self.status_var = tk.StringVar(value="● Pronto para iniciar")
+        self.status_var = tk.StringVar(value="Pronto para iniciar")
         ctk.CTkLabel(
             header, textvariable=self.status_var,
             font=("Segoe UI", 11, "bold"), text_color=C["success"]
-        ).grid(row=0, column=2, padx=22, sticky="e")
+        ).grid(row=0, column=3, padx=22, sticky="e")
 
     def _build_cards(self, parent):
         row = ctk.CTkFrame(parent, fg_color="transparent")
-        row.grid(row=1, column=0, sticky="ew", pady=(0, 18))
+        row.grid(row=0, column=0, sticky="ew", pady=(16, 16))
         for i in range(4):
             row.columnconfigure(i, weight=1)
 
@@ -183,12 +236,11 @@ class WhatsAppPanel(ctk.CTk):
         self.card_pending.grid(row=0, column=3, padx=(8, 0),  sticky="ew")
 
     def _build_toolbar(self, parent):
-        bar = ctk.CTkFrame(parent, fg_color=C["surface"], corner_radius=14)
-        bar.grid(row=2, column=0, sticky="ew", pady=(0, 18))
+        bar = ctk.CTkFrame(parent, fg_color=C["bg"], corner_radius=12)
+        bar.grid(row=1, column=0, sticky="ew", pady=(0, 16))
         bar.columnconfigure(1, weight=1)
         bar.columnconfigure(3, weight=1)
 
-        # Linha 1: formulário
         ctk.CTkLabel(bar, text="Nome", text_color=C["subtext"], font=("Segoe UI", 11)).grid(
             row=0, column=0, padx=(18, 6), pady=(16, 0), sticky="w"
         )
@@ -206,40 +258,41 @@ class WhatsAppPanel(ctk.CTk):
         pe.bind("<Return>", lambda _: self.add_contact())
 
         ctk.CTkButton(
-            bar, text="+ Adicionar", command=self.add_contact,
-            width=120, height=40, corner_radius=8,
+            bar, text="Adicionar", image=ic.add(), compound="left",
+            command=self.add_contact,
+            width=130, height=40, corner_radius=8,
             fg_color=C["accent"], hover_color="#2563eb",
             font=("Segoe UI", 11, "bold")
         ).grid(row=0, column=4, padx=(0, 18), pady=(16, 0))
 
-        # Linha 2: ações
         actions = ctk.CTkFrame(bar, fg_color="transparent")
         actions.grid(row=1, column=0, columnspan=5, sticky="ew", padx=18, pady=(10, 16))
 
-        def _btn(text, cmd, fg, hover, w=None):
+        def _btn(text, cmd, fg, hover, img=None, w=None):
             return ctk.CTkButton(
                 actions, text=text, command=cmd,
+                image=img, compound="left",
                 height=36, corner_radius=8,
                 fg_color=fg, hover_color=hover,
                 font=("Segoe UI", 11),
                 **({"width": w} if w else {})
             )
 
-        _btn("📂 Carregar CSV", self.load_contacts_from_csv, C["border"], "#475569").pack(side="left", padx=(0, 6))
-        _btn("💾 Salvar CSV",   self.save_contacts_to_csv,   C["border"], "#475569").pack(side="left", padx=6)
-        _btn("🗑 Remover",      self.remove_selected,         C["border"], "#475569").pack(side="left", padx=6)
-        _btn("📊 Exportar",     self.export_report,           C["border"], "#475569").pack(side="left", padx=6)
+        _btn("Carregar CSV", self.load_contacts_from_csv, C["border"], "#475569", ic.folder()).pack(side="left", padx=(0, 6))
+        _btn("Salvar CSV",   self.save_contacts_to_csv,   C["border"], "#475569", ic.save()  ).pack(side="left", padx=6)
+        _btn("Remover",      self.remove_selected,         C["border"], "#475569", ic.trash() ).pack(side="left", padx=6)
+        _btn("Exportar",     self.export_report,           C["border"], "#475569", ic.chart() ).pack(side="left", padx=6)
 
-        ctk.CTkLabel(actions, text="│", text_color=C["border"], font=("Segoe UI", 20)).pack(side="left", padx=12)
+        ctk.CTkFrame(actions, fg_color=C["border"], width=1, height=30).pack(side="left", padx=14)
 
-        _btn("▶  Iniciar", self.start_send_loop, C["success"], "#059669", 120).pack(side="left", padx=6)
-        self.pause_btn = _btn("⏸  Pausar", self.pause_send_loop, C["warning"], "#d97706", 120)
+        _btn("Iniciar",  self.start_send_loop,  C["success"], "#059669", ic.play(),  130).pack(side="left", padx=6)
+        self.pause_btn = _btn("Pausar", self.pause_send_loop, C["warning"], "#d97706", ic.pause(), 130)
         self.pause_btn.pack(side="left", padx=6)
-        _btn("⏹  Parar", self.stop_send_loop, C["danger"], "#dc2626", 120).pack(side="left", padx=6)
+        _btn("Parar",    self.stop_send_loop,   C["danger"],  "#dc2626", ic.stop(),  130).pack(side="left", padx=6)
 
     def _build_content(self, parent):
         content = ctk.CTkFrame(parent, fg_color="transparent")
-        content.grid(row=3, column=0, sticky="nsew")
+        content.grid(row=2, column=0, sticky="nsew")
         content.columnconfigure(0, weight=3)
         content.columnconfigure(1, weight=1)
         content.rowconfigure(0, weight=1)
@@ -289,7 +342,6 @@ class WhatsAppPanel(ctk.CTk):
         right.columnconfigure(0, weight=1)
         right.rowconfigure(1, weight=1)
 
-        # Card de progresso
         prog = ctk.CTkFrame(right, fg_color=C["surface"], corner_radius=14)
         prog.grid(row=0, column=0, sticky="ew", pady=(0, 14))
         prog.columnconfigure(0, weight=1)
@@ -308,7 +360,6 @@ class WhatsAppPanel(ctk.CTk):
         self.progress_bar.set(0)
         self.progress_bar.grid(row=2, column=0, sticky="ew", padx=16, pady=(10, 16))
 
-        # Card de log
         log_card = ctk.CTkFrame(right, fg_color=C["surface"], corner_radius=14)
         log_card.grid(row=1, column=0, sticky="nsew")
         log_card.columnconfigure(0, weight=1)
@@ -321,8 +372,9 @@ class WhatsAppPanel(ctk.CTk):
             row=0, column=0, sticky="w"
         )
         ctk.CTkButton(
-            log_hdr, text="Limpar", command=self.clear_log,
-            width=70, height=28, corner_radius=6,
+            log_hdr, text="Limpar", image=ic.close(14), compound="left",
+            command=self.clear_log,
+            width=80, height=28, corner_radius=6,
             fg_color=C["border"], hover_color="#475569",
             font=("Segoe UI", 10)
         ).grid(row=0, column=1, sticky="e")
@@ -335,6 +387,120 @@ class WhatsAppPanel(ctk.CTk):
         )
         self.log_box.grid(row=1, column=0, sticky="nsew", padx=12, pady=(8, 12))
 
+    def _build_messages_tab(self, parent):
+        info = ctk.CTkFrame(parent, fg_color=C["bg"], corner_radius=10)
+        info.grid(row=0, column=0, sticky="ew", padx=16, pady=(16, 10))
+        ctk.CTkLabel(
+            info,
+            text="Use {nome} para personalizar com o nome do contato.  "
+                 "Cada bloco é enviado como uma mensagem separada no WhatsApp.",
+            font=("Segoe UI", 11), text_color=C["subtext"],
+            wraplength=900, justify="left",
+        ).grid(row=0, column=0, sticky="w", padx=14, pady=10)
+
+        self.blocks_scroll = ctk.CTkScrollableFrame(
+            parent, fg_color="transparent", corner_radius=0
+        )
+        self.blocks_scroll.grid(row=1, column=0, sticky="nsew", padx=16, pady=(0, 10))
+        self.blocks_scroll.columnconfigure(0, weight=1)
+
+        btns = ctk.CTkFrame(parent, fg_color="transparent")
+        btns.grid(row=2, column=0, sticky="ew", padx=16, pady=(0, 16))
+
+        ctk.CTkButton(
+            btns, text="Adicionar Mensagem", image=ic.add(), compound="left",
+            command=lambda: self._add_block(),
+            height=38, corner_radius=8,
+            fg_color=C["accent"], hover_color="#2563eb",
+            font=("Segoe UI", 11, "bold")
+        ).pack(side="left", padx=(0, 10))
+
+        ctk.CTkButton(
+            btns, text="Salvar Mensagens", image=ic.save(), compound="left",
+            command=self._save_messages,
+            height=38, corner_radius=8,
+            fg_color=C["success"], hover_color="#059669",
+            font=("Segoe UI", 11, "bold")
+        ).pack(side="left")
+
+        for bloco in self.blocos:
+            self._add_block(bloco)
+
+    def _add_block(self, text: str = ""):
+        idx = len(self.block_widgets) + 1
+
+        frame = ctk.CTkFrame(self.blocks_scroll, fg_color=C["surface"], corner_radius=10)
+        frame.grid(row=idx - 1, column=0, sticky="ew", pady=(0, 10))
+        frame.columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(
+            frame,
+            text=f"Mensagem {idx}",
+            font=("Segoe UI", 11, "bold"), text_color=C["accent"], width=110,
+        ).grid(row=0, column=0, padx=(14, 10), pady=14, sticky="nw")
+
+        box = ctk.CTkTextbox(
+            frame, height=80, corner_radius=8,
+            fg_color=C["bg"], text_color=C["text"],
+            font=("Segoe UI", 11),
+        )
+        box.grid(row=0, column=1, padx=(0, 10), pady=12, sticky="ew")
+        if text:
+            box.insert("0.0", text)
+
+        def _remove(f=frame, b=box):
+            self.block_widgets = [(fr, bx) for fr, bx in self.block_widgets if bx is not b]
+            f.destroy()
+            self._renumber_blocks()
+
+        ctk.CTkButton(
+            frame, text="", image=ic.close(14), command=_remove,
+            width=34, height=34, corner_radius=6,
+            fg_color=C["danger"], hover_color="#dc2626",
+        ).grid(row=0, column=2, padx=(0, 12), pady=14, sticky="n")
+
+        self.block_widgets.append((frame, box))
+
+    def _renumber_blocks(self):
+        for i, (frame, _) in enumerate(self.block_widgets):
+            frame.grid(row=i, column=0, sticky="ew", pady=(0, 10))
+            for child in frame.winfo_children():
+                if isinstance(child, ctk.CTkLabel) and child.cget("text").startswith("Mensagem"):
+                    child.configure(text=f"Mensagem {i + 1}")
+
+    def _save_messages(self):
+        blocos = []
+        for _, box in self.block_widgets:
+            text = box.get("0.0", "end").strip()
+            if text:
+                blocos.append(text)
+
+        if not blocos:
+            messagebox.showwarning("Aviso", "Adicione pelo menos uma mensagem antes de salvar.")
+            return
+
+        self.blocos = blocos
+        self._messages_path().write_text(
+            json.dumps(blocos, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        self.log(f"Mensagens salvas: {len(blocos)} bloco(s).")
+        messagebox.showinfo("Salvo", f"{len(blocos)} mensagem(ns) salva(s) com sucesso.")
+
+    def _build_footer(self, parent):
+        footer = ctk.CTkFrame(parent, fg_color="transparent", height=28)
+        footer.grid(row=2, column=0, sticky="ew", pady=(10, 0))
+        footer.columnconfigure(0, weight=1)
+        footer.grid_propagate(False)
+
+        prefix = ctk.CTkLabel(footer, text="Desenvolvido por ", font=("Segoe UI", 10), text_color=C["subtext"])
+        prefix.grid(row=0, column=0, sticky="e")
+
+        link = ctk.CTkLabel(footer, text="ZINKRA", font=("Segoe UI", 10, "bold"), text_color=C["accent"], cursor="hand2")
+        link.grid(row=0, column=1, sticky="w")
+        link.bind("<Button-1>", lambda _: webbrowser.open("https://www.zinkra.com.br"))
+        link.bind("<Enter>",    lambda _: link.configure(text_color="#60a5fa"))
+        link.bind("<Leave>",    lambda _: link.configure(text_color=C["accent"]))
+
     # ──────────────────────────────────────────────────────────────────────────
     # Thread-safe helpers
     # ──────────────────────────────────────────────────────────────────────────
@@ -346,7 +512,7 @@ class WhatsAppPanel(ctk.CTk):
         self.after(0, lambda: self.status_var.set(text))
 
     # ──────────────────────────────────────────────────────────────────────────
-    # Ações sobre contatos
+    # Contatos
     # ──────────────────────────────────────────────────────────────────────────
 
     def add_contact(self):
@@ -418,7 +584,7 @@ class WhatsAppPanel(ctk.CTk):
 
         lines = [
             "=" * 65,
-            f"  RELATÓRIO DE ENVIO — {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}",
+            f"  RELATORIO DE ENVIO — {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}",
             "=" * 65,
             f"  Total: {total}   Enviados: {sent}   Falhas: {failed}   Pendentes: {pending}",
             "-" * 65,
@@ -430,8 +596,8 @@ class WhatsAppPanel(ctk.CTk):
         lines.append("=" * 65)
 
         report_path.write_text("\n".join(lines), encoding="utf-8")
-        self.log(f"Relatório exportado: {report_path}")
-        messagebox.showinfo("Relatório", f"Arquivo criado: {report_path}")
+        self.log(f"Relatorio exportado: {report_path}")
+        messagebox.showinfo("Relatorio", f"Arquivo criado: {report_path}")
 
     # ──────────────────────────────────────────────────────────────────────────
     # Tabela
@@ -458,7 +624,6 @@ class WhatsAppPanel(ctk.CTk):
         ratio = (self.sent_count + self.failed_count) / total if total else 0
         self.progress_bar.set(ratio)
         self.summary_var.set(f"{self.sent_count + self.failed_count} / {total} concluídos")
-
         self.last_report = (
             f"Total={total} | Enviados={self.sent_count} | "
             f"Falhas={self.failed_count} | Pendentes={pending}"
@@ -489,13 +654,16 @@ class WhatsAppPanel(ctk.CTk):
         if not self.contacts:
             messagebox.showwarning("Aviso", "Adicione ou carregue contatos antes de iniciar.")
             return
+        if not self.blocos:
+            messagebox.showwarning("Aviso", "Configure pelo menos uma mensagem na aba Mensagens.")
+            return
 
         self.running        = True
         self.stop_requested = False
         self.paused         = False
-        self.pause_btn.configure(text="⏸  Pausar")
-        self.status_var.set("● Enviando mensagens...")
-        self.log("Iniciando envio...")
+        self.pause_btn.configure(text="Pausar", image=ic.pause())
+        self.status_var.set("Enviando mensagens...")
+        self.log(f"Iniciando envio com {len(self.blocos)} bloco(s)...")
         threading.Thread(target=self._send_all, daemon=True).start()
 
     def pause_send_loop(self):
@@ -503,20 +671,21 @@ class WhatsAppPanel(ctk.CTk):
             return
         self.paused = not self.paused
         if self.paused:
-            self.pause_btn.configure(text="▶  Retomar")
-            self._set_status("⏸ Pausado")
+            self.pause_btn.configure(text="Retomar", image=ic.play())
+            self._set_status("Pausado")
             self._log_safe("Envio pausado.")
         else:
-            self.pause_btn.configure(text="⏸  Pausar")
-            self._set_status("● Enviando mensagens...")
+            self.pause_btn.configure(text="Pausar", image=ic.pause())
+            self._set_status("Enviando mensagens...")
             self._log_safe("Envio retomado.")
 
     def stop_send_loop(self):
         self.stop_requested = True
-        self._set_status("⏹ Parando envio...")
-        self._log_safe("Solicitação de parada enviada.")
+        self._set_status("Parando envio...")
+        self._log_safe("Solicitacao de parada enviada.")
 
     def _send_all(self):
+        blocos = list(self.blocos)
         for index, item in enumerate(self.contacts):
             if self.stop_requested:
                 break
@@ -531,15 +700,15 @@ class WhatsAppPanel(ctk.CTk):
             self._log_safe(f"[{index + 1}/{len(self.contacts)}] Enviando para {nome} ({telefone})")
 
             try:
-                enviar_para(nome, telefone)
+                enviar_para(nome, telefone, blocos)
                 self._update_item_status(index, "Enviado")
-                self._log_safe(f"[{index + 1}/{len(self.contacts)}] ✓ Concluído: {nome}")
+                self._log_safe(f"[{index + 1}/{len(self.contacts)}] Concluido: {nome}")
             except Exception as exc:
                 self._update_item_status(index, "Falha")
-                self._log_safe(f"[{index + 1}/{len(self.contacts)}] ✗ Erro com {nome}: {exc}")
+                self._log_safe(f"[{index + 1}/{len(self.contacts)}] Erro com {nome}: {exc}")
 
         self.running = False
-        finale = "✓ Concluído" if not self.stop_requested else "⏹ Parado pelo usuário"
+        finale = "Concluido" if not self.stop_requested else "Parado pelo usuario"
         self._set_status(finale)
         self._log_safe("Processo finalizado.")
         self.after(0, self._show_final_summary)

@@ -1,6 +1,6 @@
 # ZapFlow
 
-ZapFlow é uma ferramenta de automação de envio de mensagens via **WhatsApp Desktop** no Windows, com painel visual moderno, leitura de contatos via CSV e suporte a geração de executável `.exe`.
+ZapFlow é uma ferramenta de automação de envio de mensagens via **WhatsApp Desktop** no Windows, com painel visual moderno, editor de mensagens integrado, leitura de contatos via CSV e suporte a geração de executável `.exe`.
 
 ![Python](https://img.shields.io/badge/Python-3.10+-blue) ![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey) ![UI](https://img.shields.io/badge/UI-CustomTkinter-purple)
 
@@ -9,17 +9,22 @@ ZapFlow é uma ferramenta de automação de envio de mensagens via **WhatsApp De
 ## Funcionalidades
 
 - Painel visual dark com tema moderno (customtkinter)
+- Ícones vetoriais em todos os botões (sem emojis)
 - Cards de estatísticas em tempo real (Total, Enviados, Falhas, Pendentes)
 - Tabela de contatos com status colorido por linha
 - Barra de progresso animada
 - Log de atividade em tempo real
+- **Editor de mensagens integrado** — adicione, edite e remova blocos de mensagem direto no app
+- Mensagens salvas em `messages.json` e carregadas automaticamente na próxima abertura
 - Adicionar contatos manualmente ou via CSV
 - Remover contatos da lista
-- Salvar e exportar relatório em `.txt`
+- Salvar lista de contatos no CSV
+- Exportar relatório de envio em `.txt`
 - Pausar e retomar envio a qualquer momento
 - Validação automática de números brasileiros e internacionais
 - Suporte a emojis e acentos nas mensagens (via clipboard)
 - Ícone personalizado na janela e barra de tarefas
+- Rodapé com link para o site da ZINKRA
 
 ---
 
@@ -29,9 +34,11 @@ ZapFlow é uma ferramenta de automação de envio de mensagens via **WhatsApp De
 bot/
 ├── panel_app.py          # Painel visual principal
 ├── whatsapp_sender.py    # Motor de envio via WhatsApp Desktop
-├── config.py             # Mensagens, delays e configurações
+├── config.py             # Mensagens padrão, delays e configurações
+├── icons.py              # Ícones vetoriais gerados com PIL
 ├── contatos.csv          # Lista de contatos (nome,telefone)
 ├── requirements.txt      # Dependências Python
+├── installer.iss         # Script do instalador (Inno Setup)
 ├── img/
 │   ├── zapflow.png       # Logo do app
 │   └── zapflow.ico       # Ícone para o executável
@@ -48,7 +55,7 @@ bot/
 2. Coloque o `contatos.csv` na mesma pasta que o `ZapFlow.exe`
 3. Abra o `ZapFlow.exe` com duplo clique
 
-> Para gerar o `.exe` novamente, veja a seção abaixo.
+Para distribuir o app, use o instalador em `installer/ZapFlow_Setup.exe`.
 
 ### Opção 2 — Rodar via Python
 
@@ -72,14 +79,23 @@ Maria,5511999999999
 João,5511888888888
 ```
 
-**4. Ajustar as mensagens**
-
-Edite `config.py` para personalizar os blocos de texto, delays e pausas.
-
-**5. Executar o painel**
+**4. Executar o painel**
 ```powershell
 python panel_app.py
 ```
+
+---
+
+## Editor de mensagens
+
+Na aba **Mensagens** dentro do app é possível:
+
+- Editar cada bloco de texto livremente
+- Adicionar novos blocos (cada bloco = uma mensagem separada no WhatsApp)
+- Remover blocos desnecessários
+- Salvar — as mensagens ficam em `messages.json` ao lado do executável
+
+Use `{nome}` em qualquer bloco para personalizar com o nome do contato.
 
 ---
 
@@ -98,7 +114,15 @@ pyinstaller --onefile --windowed --icon=img/zapflow.ico --name=ZapFlow --add-dat
 copy contatos.csv dist\contatos.csv
 ```
 
-O executável ficará em `dist/ZapFlow.exe`.
+## Gerar o instalador
+
+Com o [Inno Setup](https://jrsoftware.org/isinfo.php) instalado:
+
+```powershell
+ISCC.exe installer.iss
+```
+
+O instalador ficará em `installer/ZapFlow_Setup.exe`.
 
 ---
 
@@ -120,4 +144,4 @@ O executável ficará em `dist/ZapFlow.exe`.
 
 ## Autor
 
-Desenvolvido por **Dlima15**.
+Desenvolvido por **Dlima15** — [ZINKRA](https://www.zinkra.com.br)
