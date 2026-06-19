@@ -1,9 +1,16 @@
+import sys
 import threading
 import time
 import tkinter as tk
 from datetime import datetime
 from pathlib import Path
 from tkinter import messagebox, ttk
+
+
+def _resource(relative: str) -> Path:
+    """Resolve caminho tanto em dev quanto dentro do executável PyInstaller."""
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).parent))
+    return base / relative
 
 import customtkinter as ctk
 
@@ -104,11 +111,20 @@ class WhatsAppPanel(ctk.CTk):
         self.load_contacts_from_csv()
 
     def _set_icon(self):
-        icon_path = Path(__file__).parent / "img" / "zapflow.png"
-        if icon_path.exists():
-            img = tk.PhotoImage(file=str(icon_path))
+        # Vincula o processo ao ícone do .exe na barra de tarefas do Windows
+        if sys.platform == "win32":
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("zapflow.app")
+
+        ico_path = _resource("img/zapflow.ico")
+        png_path = _resource("img/zapflow.png")
+
+        if ico_path.exists():
+            self.iconbitmap(str(ico_path))
+        elif png_path.exists():
+            img = tk.PhotoImage(file=str(png_path))
             self.iconphoto(True, img)
-            self._icon_ref = img  # evita garbage collection
+            self._icon_ref = img
 
     # ──────────────────────────────────────────────────────────────────────────
     # Layout
