@@ -173,7 +173,6 @@ class WhatsAppPanel(ctk.CTk):
             segmented_button_selected_hover_color="#2563eb",
             segmented_button_unselected_color=C["border"],
             segmented_button_unselected_hover_color="#475569",
-            segmented_button_selected_fg_color=C["accent"],
             text_color=C["text"],
         )
         tabs.grid(row=1, column=0, sticky="nsew", pady=(16, 0))
