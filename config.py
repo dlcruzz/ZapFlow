@@ -3,9 +3,10 @@ from pathlib import Path
 # Blocos de mensagem que serão enviados. Use {nome} para personalizar.
 BLOCOS = [
     "Olá {nome}, tudo bem? 👋",
-    "Sou da equipe de automação, queria te apresentar rapidamente uma oportunidade.",
-    "Se quiser, posso enviar mais detalhes depois.",
-    "Obrigado pela atenção!",
+    "Pesquisei o escritório no Google — do jeito que um cliente faria antes de contratar um advogado.",
+    "Crio sites para escritórios de advocacia que transmitem autoridade, aparecem no Google e geram consultas novas — sem depender só de indicação.",
+    "Posso apresentar uma prévia gratuita de como ficaria o site de vocês, sem compromisso nenhum.",
+    "Quem seria o responsável para eu apresentar?"
 ]
 
 # Delay aleatório entre blocos (em segundos)

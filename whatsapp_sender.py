@@ -145,8 +145,7 @@ def open_whatsapp_desktop() -> None:
 def wait_for_whatsapp_ready(timeout: int = 45) -> None:
     deadline = time.time() + timeout
     while time.time() < deadline:
-        windows = pyautogui.getWindowsWithTitle("WhatsApp")
-        if windows:
+        if gw.getWindowsWithTitle("WhatsApp"):
             return
         time.sleep(0.5)
     raise TimeoutError(
@@ -156,9 +155,9 @@ def wait_for_whatsapp_ready(timeout: int = 45) -> None:
 
 def open_chat_direct(phone: str) -> None:
     urls = [
+        f"whatsapp://send?phone={phone}",
         f"https://wa.me/{phone}",
         f"https://web.whatsapp.com/send?phone={phone}",
-        f"whatsapp://send?phone={phone}",
     ]
 
     for url in urls:
@@ -168,6 +167,10 @@ def open_chat_direct(phone: str) -> None:
             else:
                 webbrowser.open(url, new=0, autoraise=True)
             logger.info("Tentando abrir conversa via: %s", url)
+            # A primeira tentativa com o protocolo do app é a mais relevante.
+            # Se o protocolo não abrir corretamente, o fluxo continua para os próximos.
+            if url.startswith("whatsapp://"):
+                time.sleep(2)
             return
         except Exception as exc:
             logger.warning("Falha ao abrir %s: %s", url, exc)
@@ -197,7 +200,13 @@ def search_contact(name: str, phone: str) -> None:
 
 
 def send_text(text: str) -> None:
-    pyautogui.write(text)
+    # pyautogui.write() não suporta acentos nem emojis; usar clipboard resolve isso
+    try:
+        import pyperclip
+        pyperclip.copy(text)
+        pyautogui.hotkey("ctrl", "v")
+    except Exception:
+        pyautogui.write(text, interval=0.02)
     time.sleep(0.3)
     pyautogui.press("enter")
 
