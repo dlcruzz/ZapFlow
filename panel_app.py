@@ -255,7 +255,7 @@ class WhatsAppPanel(ctk.CTk):
         self._build_footer(root)
 
     def _build_header(self, parent):
-        hdr = ctk.CTkFrame(parent, fg_color=C["surface"], corner_radius=14, height=72)
+        hdr = ctk.CTkFrame(parent, fg_color=C["surface"], corner_radius=14, height=80)
         hdr.grid(row=0, column=0, sticky="ew")
         hdr.columnconfigure(2, weight=1)
         hdr.grid_propagate(False)
@@ -270,7 +270,17 @@ class WhatsAppPanel(ctk.CTk):
         self.status_var = tk.StringVar(value="Pronto para iniciar")
         ctk.CTkLabel(hdr, textvariable=self.status_var,
                      font=("Segoe UI", 12, "bold"),
-                     text_color=C["success"]).grid(row=0, column=3, padx=24, sticky="e")
+                     text_color=C["success"]).grid(row=0, column=3, padx=(0, 20), sticky="e")
+
+        # Botão INICIAR sempre visível no header
+        self.start_btn_hdr = ctk.CTkButton(
+            hdr, text="INICIAR ENVIO", image=ic.play(20), compound="left",
+            command=self.start_send_loop,
+            height=52, width=200, corner_radius=10,
+            font=("Segoe UI", 15, "bold"),
+            fg_color=C["success"], hover_color="#059669",
+        )
+        self.start_btn_hdr.grid(row=0, column=4, padx=(0, 20), sticky="e")
 
     # ── Aba 1: Mensagens ──────────────────────────────────────────────────────
 
@@ -381,12 +391,25 @@ class WhatsAppPanel(ctk.CTk):
                      font=("Segoe UI", 12, "bold"), text_color=C["accent"],
                      width=110).grid(row=0, column=0, padx=(14, 8), pady=14, sticky="nw")
 
-        box = ctk.CTkTextbox(frame, height=90, corner_radius=8,
+        # Coluna central: texto + botão {nome}
+        col = ctk.CTkFrame(frame, fg_color="transparent")
+        col.grid(row=0, column=1, padx=(0, 8), pady=12, sticky="ew")
+        col.columnconfigure(0, weight=1)
+
+        box = ctk.CTkTextbox(col, height=90, corner_radius=8,
                              fg_color=C["bg"], text_color=C["text"],
                              font=("Segoe UI", 12))
-        box.grid(row=0, column=1, padx=(0, 8), pady=12, sticky="ew")
+        box.grid(row=0, column=0, sticky="ew")
         placeholder = text if text else "Coloque seu texto aqui"
         box.insert("0.0", placeholder)
+
+        ctk.CTkButton(
+            col, text="Inserir {nome}",
+            command=lambda b=box: b.insert(tk.INSERT, "{nome}"),
+            height=28, corner_radius=6, font=("Segoe UI", 10),
+            fg_color=C["border"], hover_color="#475569",
+            anchor="w",
+        ).grid(row=1, column=0, sticky="w", pady=(4, 0))
 
         def _remove(f=frame, b=box):
             self.block_widgets = [(fr, bx) for fr, bx in self.block_widgets if bx is not b]
