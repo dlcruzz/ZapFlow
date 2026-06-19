@@ -49,13 +49,25 @@ bot/
 
 ## Como usar
 
-### Opção 1 — Executável (recomendado)
+### Opção 1 — Instalador (recomendado para distribuição)
+
+1. Localize o arquivo `installer/ZapFlow_Setup.exe`
+2. Clique duas vezes para abrir o assistente de instalação
+3. Escolha a pasta de instalação (padrão: `C:\Program Files\ZapFlow`)
+4. Marque a opção **"Criar atalho na Área de Trabalho"** se desejar
+5. Clique em **Instalar** e aguarde a conclusão
+6. Ao finalizar, clique em **Concluir** — o app abrirá automaticamente
+
+Após instalado, o ZapFlow aparece no **Menu Iniciar** e na **Área de Trabalho**.  
+Para desinstalar, acesse **Painel de Controle → Programas → Desinstalar ZapFlow**.
+
+> O `contatos.csv` é criado automaticamente na pasta de instalação na primeira vez que você salvar a lista de contatos.
+
+### Opção 2 — Executável portátil (sem instalação)
 
 1. Vá até a pasta `dist/`
 2. Coloque o `contatos.csv` na mesma pasta que o `ZapFlow.exe`
 3. Abra o `ZapFlow.exe` com duplo clique
-
-Para distribuir o app, use o instalador em `installer/ZapFlow_Setup.exe`.
 
 ### Opção 2 — Rodar via Python
 
