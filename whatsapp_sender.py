@@ -211,7 +211,33 @@ def send_text(text: str) -> None:
     pyautogui.press("enter")
 
 
-def enviar_para(nome: str, telefone: str) -> int:
+def _copy_image_to_clipboard(image_path: str) -> None:
+    abs_path = str(Path(image_path).resolve()).replace("'", "''")
+    ps = (
+        "Add-Type -AssemblyName System.Windows.Forms; "
+        "Add-Type -AssemblyName System.Drawing; "
+        f"$img = [System.Drawing.Image]::FromFile('{abs_path}'); "
+        "[System.Windows.Forms.Clipboard]::SetImage($img); "
+        "$img.Dispose()"
+    )
+    result = subprocess.run(
+        ["powershell", "-NoProfile", "-Command", ps],
+        capture_output=True, timeout=15
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"Falha ao copiar imagem: {result.stderr.decode()}")
+
+
+def send_image(image_path: str) -> None:
+    _copy_image_to_clipboard(image_path)
+    time.sleep(1.0)
+    pyautogui.hotkey("ctrl", "v")
+    time.sleep(3.0)
+    pyautogui.press("enter")
+    time.sleep(1.0)
+
+
+def enviar_para(nome: str, telefone: str, blocos: list | None = None, image_path: str | None = None) -> int:
     try:
         open_chat_direct(telefone)
     except RuntimeError:
@@ -230,7 +256,14 @@ def enviar_para(nome: str, telefone: str) -> int:
     focus_whatsapp_window()
     time.sleep(5)
 
-    for index, bloco in enumerate(config.BLOCOS):
+    if image_path and Path(image_path).exists():
+        logger.info("Enviando imagem: %s", image_path)
+        send_image(image_path)
+
+    if blocos is None:
+        blocos = config.BLOCOS
+
+    for index, bloco in enumerate(blocos):
         texto = bloco.format(nome=nome)
         send_text(texto)
         delay = random.uniform(config.DELAY_MIN, config.DELAY_MAX)
@@ -244,7 +277,7 @@ def enviar_para(nome: str, telefone: str) -> int:
         )
         time.sleep(delay)
 
-    return len(config.BLOCOS)
+    return len(blocos)
 
 
 def main() -> None:
