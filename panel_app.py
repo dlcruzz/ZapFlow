@@ -1,4 +1,5 @@
 import json
+import random
 import sys
 import threading
 import time
@@ -182,6 +183,20 @@ class WhatsAppPanel(ctk.CTk):
         self.block_widgets: list[tuple[ctk.CTkFrame, ctk.CTkTextbox]] = []
         self.image_path: str | None = None
 
+        # Configuração de delay
+        self.delay_mode     = tk.StringVar(value="aleatorio")
+        self.delay_fixo_var = tk.StringVar(value="10")
+        self.delay_min_var  = tk.StringVar(value="4")
+        self.delay_max_var  = tk.StringVar(value="90")
+        self.pause_min_var  = tk.StringVar(value="5")
+        self.pause_max_var  = tk.StringVar(value="30")
+
+        # Contador regressivo
+        self.countdown_var  = tk.StringVar(value="")
+        self._start_time    = 0.0
+        self._estimated_total = 0
+        self._countdown_id: str | None = None
+
         self.blocos = self._load_messages()
 
         _style_treeview()
@@ -272,15 +287,24 @@ class WhatsAppPanel(ctk.CTk):
                      font=("Segoe UI", 12, "bold"),
                      text_color=C["success"]).grid(row=0, column=3, padx=(0, 20), sticky="e")
 
-        # Botão INICIAR sempre visível no header
+        # Botão INICIAR + countdown sempre visíveis no header
+        hdr_right = ctk.CTkFrame(hdr, fg_color="transparent")
+        hdr_right.grid(row=0, column=4, padx=(0, 20), sticky="e")
+
         self.start_btn_hdr = ctk.CTkButton(
-            hdr, text="INICIAR ENVIO", image=ic.play(20), compound="left",
+            hdr_right, text="INICIAR ENVIO", image=ic.play(20), compound="left",
             command=self.start_send_loop,
-            height=52, width=200, corner_radius=10,
-            font=("Segoe UI", 15, "bold"),
+            height=48, width=200, corner_radius=10,
+            font=("Segoe UI", 14, "bold"),
             fg_color=C["success"], hover_color="#059669",
         )
-        self.start_btn_hdr.grid(row=0, column=4, padx=(0, 20), sticky="e")
+        self.start_btn_hdr.pack()
+
+        self.countdown_label = ctk.CTkLabel(
+            hdr_right, textvariable=self.countdown_var,
+            font=("Segoe UI", 11, "bold"), text_color=C["warning"]
+        )
+        self.countdown_label.pack(pady=(2, 0))
 
     # ── Aba 1: Mensagens ──────────────────────────────────────────────────────
 
@@ -593,11 +617,75 @@ class WhatsAppPanel(ctk.CTk):
         right = ctk.CTkFrame(parent, fg_color="transparent")
         right.grid(row=0, column=1, sticky="nsew")
         right.columnconfigure(0, weight=1)
-        right.rowconfigure(3, weight=1)
+        right.rowconfigure(4, weight=1)
+
+        # ── Configuração de tempo ─────────────────────────────────────────────
+        delay_card = ctk.CTkFrame(right, fg_color=C["surface"], corner_radius=14)
+        delay_card.grid(row=0, column=0, sticky="ew", pady=(0, 12))
+        delay_card.columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(delay_card, text="Configuracao de Tempo",
+                     font=("Segoe UI", 14, "bold"), text_color=C["text"]).grid(
+            row=0, column=0, sticky="w", padx=16, pady=(14, 8))
+
+        # Toggle Fixo / Aleatório
+        toggle = ctk.CTkFrame(delay_card, fg_color="transparent")
+        toggle.grid(row=1, column=0, sticky="w", padx=16, pady=(0, 8))
+        ctk.CTkRadioButton(toggle, text="Fixo", variable=self.delay_mode, value="fixo",
+                           command=self._on_delay_mode_change,
+                           font=("Segoe UI", 12)).pack(side="left", padx=(0, 20))
+        ctk.CTkRadioButton(toggle, text="Aleatorio", variable=self.delay_mode, value="aleatorio",
+                           command=self._on_delay_mode_change,
+                           font=("Segoe UI", 12)).pack(side="left")
+
+        # Frame modo Fixo
+        self._delay_fixo_frame = ctk.CTkFrame(delay_card, fg_color="transparent")
+        self._delay_fixo_frame.grid(row=2, column=0, sticky="ew", padx=16, pady=(0, 6))
+        ctk.CTkLabel(self._delay_fixo_frame, text="Aguardar",
+                     font=("Segoe UI", 12), text_color=C["subtext"]).pack(side="left")
+        ctk.CTkEntry(self._delay_fixo_frame, textvariable=self.delay_fixo_var,
+                     width=70, height=34, corner_radius=6,
+                     font=("Segoe UI", 12)).pack(side="left", padx=8)
+        ctk.CTkLabel(self._delay_fixo_frame, text="seg entre mensagens",
+                     font=("Segoe UI", 12), text_color=C["subtext"]).pack(side="left")
+
+        # Frame modo Aleatório
+        self._delay_rand_frame = ctk.CTkFrame(delay_card, fg_color="transparent")
+        self._delay_rand_frame.grid(row=2, column=0, sticky="ew", padx=16, pady=(0, 6))
+        ctk.CTkLabel(self._delay_rand_frame, text="Entre",
+                     font=("Segoe UI", 12), text_color=C["subtext"]).pack(side="left")
+        ctk.CTkEntry(self._delay_rand_frame, textvariable=self.delay_min_var,
+                     width=65, height=34, corner_radius=6,
+                     font=("Segoe UI", 12)).pack(side="left", padx=6)
+        ctk.CTkLabel(self._delay_rand_frame, text="e",
+                     font=("Segoe UI", 12), text_color=C["subtext"]).pack(side="left")
+        ctk.CTkEntry(self._delay_rand_frame, textvariable=self.delay_max_var,
+                     width=65, height=34, corner_radius=6,
+                     font=("Segoe UI", 12)).pack(side="left", padx=6)
+        ctk.CTkLabel(self._delay_rand_frame, text="seg (aleatorio)",
+                     font=("Segoe UI", 12), text_color=C["subtext"]).pack(side="left")
+
+        # Pausa entre contatos
+        pause_row = ctk.CTkFrame(delay_card, fg_color="transparent")
+        pause_row.grid(row=3, column=0, sticky="ew", padx=16, pady=(4, 14))
+        ctk.CTkLabel(pause_row, text="Pausa entre contatos:",
+                     font=("Segoe UI", 12), text_color=C["subtext"]).pack(side="left")
+        ctk.CTkEntry(pause_row, textvariable=self.pause_min_var,
+                     width=60, height=34, corner_radius=6,
+                     font=("Segoe UI", 12)).pack(side="left", padx=6)
+        ctk.CTkLabel(pause_row, text="a",
+                     font=("Segoe UI", 12), text_color=C["subtext"]).pack(side="left")
+        ctk.CTkEntry(pause_row, textvariable=self.pause_max_var,
+                     width=60, height=34, corner_radius=6,
+                     font=("Segoe UI", 12)).pack(side="left", padx=6)
+        ctk.CTkLabel(pause_row, text="seg",
+                     font=("Segoe UI", 12), text_color=C["subtext"]).pack(side="left")
+
+        self._on_delay_mode_change()  # aplica visibilidade inicial
 
         # Cards de estatísticas (2x2)
         cards = ctk.CTkFrame(right, fg_color="transparent")
-        cards.grid(row=0, column=0, sticky="ew", pady=(0, 12))
+        cards.grid(row=1, column=0, sticky="ew", pady=(0, 12))
         cards.columnconfigure(0, weight=1)
         cards.columnconfigure(1, weight=1)
 
@@ -612,7 +700,7 @@ class WhatsAppPanel(ctk.CTk):
 
         # Progresso
         prog = ctk.CTkFrame(right, fg_color=C["surface"], corner_radius=14)
-        prog.grid(row=1, column=0, sticky="ew", pady=(12, 12))
+        prog.grid(row=2, column=0, sticky="ew", pady=(12, 12))
         prog.columnconfigure(0, weight=1)
 
         self.summary_var = tk.StringVar(value="0 / 0 concluidos")
@@ -627,7 +715,7 @@ class WhatsAppPanel(ctk.CTk):
 
         # Botões de controle
         ctrl = ctk.CTkFrame(right, fg_color=C["surface"], corner_radius=14)
-        ctrl.grid(row=2, column=0, sticky="ew", pady=(0, 12))
+        ctrl.grid(row=3, column=0, sticky="ew", pady=(0, 12))
         ctrl.columnconfigure(0, weight=1)
 
         ctk.CTkLabel(ctrl, text="Controle de Envio",
@@ -660,7 +748,7 @@ class WhatsAppPanel(ctk.CTk):
 
         # Log
         log_card = ctk.CTkFrame(right, fg_color=C["surface"], corner_radius=14)
-        log_card.grid(row=3, column=0, sticky="nsew")
+        log_card.grid(row=4, column=0, sticky="nsew")
         log_card.columnconfigure(0, weight=1)
         log_card.rowconfigure(1, weight=1)
 
@@ -698,6 +786,70 @@ class WhatsAppPanel(ctk.CTk):
         link.bind("<Button-1>", lambda _: webbrowser.open("https://www.zinkra.com.br"))
         link.bind("<Enter>",    lambda _: link.configure(text_color="#60a5fa"))
         link.bind("<Leave>",    lambda _: link.configure(text_color=C["accent"]))
+
+    # ── Delay e tempo ────────────────────────────────────────────────────────
+
+    def _on_delay_mode_change(self):
+        if self.delay_mode.get() == "fixo":
+            self._delay_rand_frame.grid_remove()
+            self._delay_fixo_frame.grid()
+        else:
+            self._delay_fixo_frame.grid_remove()
+            self._delay_rand_frame.grid()
+
+    def _get_block_delay(self) -> float:
+        try:
+            if self.delay_mode.get() == "fixo":
+                return max(1.0, float(self.delay_fixo_var.get()))
+            mn = max(1.0, float(self.delay_min_var.get()))
+            mx = max(mn, float(self.delay_max_var.get()))
+            return random.uniform(mn, mx)
+        except ValueError:
+            return 10.0
+
+    def _get_pause_delay(self) -> float:
+        try:
+            mn = max(1.0, float(self.pause_min_var.get()))
+            mx = max(mn, float(self.pause_max_var.get()))
+            return random.uniform(mn, mx)
+        except ValueError:
+            return random.uniform(5.0, 30.0)
+
+    def _estimate_total_seconds(self, n_contacts: int, n_blocks: int) -> int:
+        try:
+            if self.delay_mode.get() == "fixo":
+                avg_block = float(self.delay_fixo_var.get())
+            else:
+                mn = float(self.delay_min_var.get())
+                mx = float(self.delay_max_var.get())
+                avg_block = (mn + mx) / 2
+            avg_pause = (float(self.pause_min_var.get()) + float(self.pause_max_var.get())) / 2
+            overhead = 8  # abertura do chat + foco na janela
+            return int(n_contacts * (overhead + n_blocks * avg_block + avg_pause))
+        except ValueError:
+            return 0
+
+    @staticmethod
+    def _format_time(seconds: int) -> str:
+        if seconds <= 0:
+            return "0 seg"
+        h = seconds // 3600
+        m = (seconds % 3600) // 60
+        s = seconds % 60
+        if h > 0:
+            return f"{h}h {m}min {s}seg"
+        if m > 0:
+            return f"{m}min {s}seg"
+        return f"{s}seg"
+
+    def _tick_countdown(self):
+        if not self.running:
+            self.countdown_var.set("")
+            return
+        elapsed    = int(time.time() - self._start_time)
+        remaining  = max(0, self._estimated_total - elapsed)
+        self.countdown_var.set(f"Restante: {self._format_time(remaining)}")
+        self._countdown_id = self.after(1000, self._tick_countdown)
 
     # ── Thread-safe helpers ───────────────────────────────────────────────────
 
@@ -845,13 +997,19 @@ class WhatsAppPanel(ctk.CTk):
                                    "Configure pelo menos uma mensagem no Passo 1 — Mensagens.")
             return
         self.blocos = blocos
-        self.running        = True
-        self.stop_requested = False
-        self.paused         = False
+        self.running          = True
+        self.stop_requested   = False
+        self.paused           = False
+        self._start_time      = time.time()
+        self._estimated_total = self._estimate_total_seconds(len(self.contacts), len(blocos))
+
         self.pause_btn.configure(text="Pausar", image=ic.pause())
         self.status_var.set("Enviando mensagens...")
+        estimativa = self._format_time(self._estimated_total)
+        self.countdown_var.set(f"Estimativa: {estimativa}")
         self.log(f"Iniciando envio — {len(self.blocos)} mensagem(ns), "
-                 f"{len(self.contacts)} contato(s).")
+                 f"{len(self.contacts)} contato(s). Tempo estimado: {estimativa}.")
+        self._tick_countdown()
         threading.Thread(target=self._send_all, daemon=True).start()
 
     def pause_send_loop(self):
@@ -875,6 +1033,8 @@ class WhatsAppPanel(ctk.CTk):
     def _send_all(self):
         blocos     = list(self.blocos)
         image_path = self.image_path
+        total      = len(self.contacts)
+
         for index, item in enumerate(self.contacts):
             if self.stop_requested:
                 break
@@ -886,15 +1046,25 @@ class WhatsAppPanel(ctk.CTk):
             nome     = item["nome"]
             telefone = item["telefone"]
             self._update_item_status(index, "Enviando")
-            self._log_safe(f"[{index + 1}/{len(self.contacts)}] Enviando para {nome}...")
+            self._log_safe(f"[{index + 1}/{total}] Enviando para {nome}...")
 
             try:
-                enviar_para(nome, telefone, blocos, image_path)
+                d_min = d_max = float(self.delay_fixo_var.get()) if self.delay_mode.get() == "fixo" \
+                    else (float(self.delay_min_var.get()), float(self.delay_max_var.get()))[0]
+                d_max = d_min if self.delay_mode.get() == "fixo" else float(self.delay_max_var.get())
+                enviar_para(nome, telefone, blocos, image_path,
+                            delay_min=d_min, delay_max=d_max)
                 self._update_item_status(index, "Enviado")
-                self._log_safe(f"[{index + 1}/{len(self.contacts)}] Concluido: {nome}")
+                self._log_safe(f"[{index + 1}/{total}] Concluido: {nome}")
             except Exception as exc:
                 self._update_item_status(index, "Falha")
-                self._log_safe(f"[{index + 1}/{len(self.contacts)}] Erro com {nome}: {exc}")
+                self._log_safe(f"[{index + 1}/{total}] Erro com {nome}: {exc}")
+
+            # Pausa entre contatos (exceto após o último)
+            if index < total - 1 and not self.stop_requested:
+                pausa = self._get_pause_delay()
+                self._log_safe(f"Aguardando {pausa:.0f}s antes do proximo contato...")
+                time.sleep(pausa)
 
         self.running = False
         self._set_status("Concluido" if not self.stop_requested else "Parado pelo usuario")

@@ -237,7 +237,10 @@ def send_image(image_path: str) -> None:
     time.sleep(1.0)
 
 
-def enviar_para(nome: str, telefone: str, blocos: list | None = None, image_path: str | None = None) -> int:
+def enviar_para(nome: str, telefone: str, blocos: list | None = None,
+                image_path: str | None = None,
+                delay_min: float | None = None,
+                delay_max: float | None = None) -> int:
     try:
         open_chat_direct(telefone)
     except RuntimeError:
@@ -262,11 +265,13 @@ def enviar_para(nome: str, telefone: str, blocos: list | None = None, image_path
 
     if blocos is None:
         blocos = config.BLOCOS
+    d_min = delay_min if delay_min is not None else config.DELAY_MIN
+    d_max = delay_max if delay_max is not None else config.DELAY_MAX
 
     for index, bloco in enumerate(blocos):
         texto = bloco.format(nome=nome)
         send_text(texto)
-        delay = random.uniform(config.DELAY_MIN, config.DELAY_MAX)
+        delay = random.uniform(d_min, d_max)
         logger.info(
             "Contato=%s (%s) bloco=%d/%d delay=%.1fs",
             nome,
