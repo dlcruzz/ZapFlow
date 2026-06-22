@@ -182,12 +182,59 @@ def focus_whatsapp_window() -> None:
     windows = gw.getWindowsWithTitle("WhatsApp")
     if not windows:
         return
-
     target = windows[0]
     if target.isMinimized:
         target.restore()
     target.activate()
     time.sleep(1.0)
+
+
+def _click_message_input() -> None:
+    """Clica no campo de mensagem do WhatsApp para garantir o foco correto."""
+    windows = gw.getWindowsWithTitle("WhatsApp")
+    if not windows:
+        raise RuntimeError("Janela do WhatsApp nao encontrada.")
+    w = windows[0]
+    if w.isMinimized:
+        w.restore()
+        time.sleep(0.8)
+    try:
+        w.activate()
+        time.sleep(0.5)
+    except Exception:
+        pass
+    # Campo de mensagem fica ~60px acima da base da janela, centro horizontal
+    x = w.left + w.width // 2
+    y = w.top + w.height - 60
+    pyautogui.click(x, y)
+    time.sleep(0.5)
+
+
+def _detect_and_dismiss_dialog() -> bool:
+    """
+    Detecta popup de numero invalido do WhatsApp via screenshot.
+    O fundo do WhatsApp e escuro; um dialog e branco/claro.
+    Retorna True se detectou e fechou um dialog.
+    """
+    windows = gw.getWindowsWithTitle("WhatsApp")
+    if not windows:
+        return False
+    w = windows[0]
+    try:
+        cx = w.left + w.width // 2
+        cy = w.top + w.height // 2
+        shot = pyautogui.screenshot(region=(cx - 200, cy - 100, 400, 200))
+        pixels = list(shot.getdata())
+        light = sum(1 for r, g, b in pixels if r > 200 and g > 200 and b > 200)
+        if light / len(pixels) > 0.25:
+            # Dialog detectado — fecha pressionando Enter (botao OK)
+            pyautogui.press("enter")
+            time.sleep(0.8)
+            logger.info("Dialog de numero invalido detectado e fechado.")
+            return True
+    except Exception:
+        pass
+    return False
 
 
 def search_contact(name: str, phone: str) -> None:
@@ -241,46 +288,57 @@ def enviar_para(nome: str, telefone: str, blocos: list | None = None,
                 image_path: str | None = None,
                 delay_min: float | None = None,
                 delay_max: float | None = None) -> int:
+
+    # 1. Abre o chat correto via link direto
     try:
         open_chat_direct(telefone)
     except RuntimeError:
-        logger.warning(
-            "Falha ao abrir o chat pelo link direto; tentando abrir o app manualmente."
-        )
+        logger.warning("Falha no link direto; tentando abrir o app manualmente.")
         try:
             open_whatsapp_desktop()
         except FileNotFoundError:
-            logger.warning(
-                "Não foi possível abrir o WhatsApp automaticamente; aguardando abertura manual."
-            )
+            logger.warning("WhatsApp nao encontrado; aguardando abertura manual.")
         wait_for_whatsapp_ready()
         search_contact(nome, telefone)
 
-    focus_whatsapp_window()
-    time.sleep(5)
+    # 2. Aguarda o WhatsApp processar o link e navegar para o chat
+    time.sleep(3.0)
 
+    # 3. Traz o WhatsApp para frente
+    focus_whatsapp_window()
+    time.sleep(3.0)
+
+    # 4. Detecta e fecha dialog de numero invalido automaticamente
+    if _detect_and_dismiss_dialog():
+        raise InvalidWhatsAppNumberError(
+            f"Numero {telefone} nao possui WhatsApp ou e invalido."
+        )
+
+    # 5. Clica no campo de mensagem — garante que o foco esta correto
+    #    (evita que o texto va parar em outra janela aberta)
+    _click_message_input()
+
+    # 6. Envia imagem se houver
     if image_path and Path(image_path).exists():
         logger.info("Enviando imagem: %s", image_path)
         send_image(image_path)
 
+    # 7. Envia os blocos de texto com delay configurado
     if blocos is None:
         blocos = config.BLOCOS
     d_min = delay_min if delay_min is not None else config.DELAY_MIN
     d_max = delay_max if delay_max is not None else config.DELAY_MAX
 
     for index, bloco in enumerate(blocos):
+        # Garante foco antes de cada bloco
+        _click_message_input()
         texto = bloco.format(nome=nome)
         send_text(texto)
-        delay = random.uniform(d_min, d_max)
-        logger.info(
-            "Contato=%s (%s) bloco=%d/%d delay=%.1fs",
-            nome,
-            telefone,
-            index + 1,
-            len(config.BLOCOS),
-            delay,
-        )
-        time.sleep(delay)
+        if index < len(blocos) - 1:
+            delay = random.uniform(d_min, d_max)
+            logger.info("Contato=%s bloco=%d/%d delay=%.1fs",
+                        nome, index + 1, len(blocos), delay)
+            time.sleep(delay)
 
     return len(blocos)
 

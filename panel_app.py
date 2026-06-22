@@ -14,7 +14,8 @@ from PIL import Image as PILImage
 
 import config
 import icons as ic
-from whatsapp_sender import enviar_para, read_contacts, validate_phone
+from whatsapp_sender import (InvalidWhatsAppNumberError, enviar_para,
+                             read_contacts, validate_phone)
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
@@ -1177,6 +1178,9 @@ class WhatsAppPanel(ctk.CTk):
                             delay_min=d_min, delay_max=d_max)
                 self._update_item_status(index, "Enviado")
                 self._log_safe(f"[{index + 1}/{total}] Concluido: {nome}")
+            except InvalidWhatsAppNumberError:
+                self._update_item_status(index, "Falha")
+                self._log_safe(f"[{index + 1}/{total}] Sem WhatsApp: {nome} ({telefone}) — pulando.")
             except Exception as exc:
                 self._update_item_status(index, "Falha")
                 self._log_safe(f"[{index + 1}/{total}] Erro com {nome}: {exc}")
