@@ -21,6 +21,7 @@ import pyautogui
 import pygetwindow as gw
 
 import config
+from anti_ban import get_profile
 
 # ── Estruturas Windows para envio de unicode via SendInput ────────────────────
 
@@ -289,14 +290,24 @@ def _send_raw_scan(scan: int) -> None:
         ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(_INPUT))
 
 
-def send_text(text: str) -> None:
+def _simulate_reading() -> None:
+    """Simula leitura da conversa antes de começar a digitar."""
+    scrolls = random.randint(1, 3)
+    for _ in range(scrolls):
+        pyautogui.scroll(random.randint(2, 5))
+        time.sleep(random.uniform(0.3, 0.9))
+    pyautogui.hotkey("ctrl", "end")
+    time.sleep(random.uniform(0.4, 1.0))
+
+
+def send_text(text: str, typing_profile: str = "aleatorio") -> None:
     """
-    Digita o texto caractere por caractere simulando digitação humana.
-    Gera o indicador 'digitando...' no WhatsApp do destinatário e evita
-    detecção de automação.
+    Digita o texto caractere por caractere com perfil de velocidade humana.
+    Suporta unicode completo (emojis, acentos) via Windows SendInput.
     """
-    # Pausa inicial — como se estivesse pensando antes de digitar
-    time.sleep(random.uniform(0.5, 1.4))
+    p = get_profile(typing_profile)
+
+    time.sleep(random.uniform(p["pre_send_min"] * 0.4, p["pre_send_min"]))
 
     for char in text:
         if char == "\n":
@@ -306,26 +317,21 @@ def send_text(text: str) -> None:
 
         _send_codepoint(ord(char))
 
-        # Velocidade humana varia por tipo de caractere
         if char in ".!?":
-            # Pausa após fim de frase (como se estivesse relendo)
-            delay = random.uniform(0.25, 0.70)
+            delay = random.uniform(p["punct_min"], p["punct_max"])
         elif char in ",;:":
-            delay = random.uniform(0.12, 0.35)
+            delay = random.uniform(p["punct_min"] * 0.6, p["punct_max"] * 0.6)
         elif char == " ":
-            delay = random.uniform(0.06, 0.18)
+            delay = random.uniform(p["space_min"], p["space_max"])
         else:
-            # Velocidade de digitação normal: ~60-200 chars/min
-            delay = random.uniform(0.04, 0.17)
+            delay = random.uniform(p["char_min"], p["char_max"])
 
-        # Hesitação aleatória (~3% das teclas) — simula pausa de pensamento
-        if random.random() < 0.03:
-            delay += random.uniform(0.6, 1.8)
+        if random.random() < p["think_chance"]:
+            delay += random.uniform(p["think_min"], p["think_max"])
 
         time.sleep(delay)
 
-    # Pausa antes de enviar — como se estivesse relendo a mensagem
-    time.sleep(random.uniform(0.8, 2.2))
+    time.sleep(random.uniform(p["pre_send_min"], p["pre_send_max"]))
     pyautogui.press("enter")
 
 
@@ -359,7 +365,8 @@ def enviar_para(nome: str, telefone: str, blocos: list | None = None,
                 image_path: str | None = None,
                 delay_min: float | None = None,
                 delay_max: float | None = None,
-                progress_callback=None) -> int:
+                progress_callback=None,
+                typing_profile: str = "aleatorio") -> int:
 
     # 1. Abre o chat correto via link direto
     try:
@@ -373,29 +380,32 @@ def enviar_para(nome: str, telefone: str, blocos: list | None = None,
         wait_for_whatsapp_ready()
         search_contact(nome, telefone)
 
-    # 2. Aguarda o WhatsApp processar o link e navegar para o chat
+    # 2. Aguarda WhatsApp processar o link
     time.sleep(3.0)
 
     # 3. Traz o WhatsApp para frente
     focus_whatsapp_window()
     time.sleep(3.0)
 
-    # 4. Detecta e fecha dialog de numero invalido automaticamente
+    # 4. Detecta e fecha dialog de número inválido
     if _detect_and_dismiss_dialog():
         raise InvalidWhatsAppNumberError(
             f"Numero {telefone} nao possui WhatsApp ou e invalido."
         )
 
-    # 5. Clica no campo de mensagem — garante que o foco esta correto
-    #    (evita que o texto va parar em outra janela aberta)
+    # 5. Garante foco no campo de mensagem
     _click_message_input()
 
-    # 6. Envia imagem se houver
+    # 6. Simula leitura da conversa anterior (comportamento humano)
+    _simulate_reading()
+    _click_message_input()
+
+    # 7. Envia imagem se houver
     if image_path and Path(image_path).exists():
         logger.info("Enviando imagem: %s", image_path)
         send_image(image_path)
 
-    # 7. Envia os blocos de texto com delay configurado
+    # 8. Envia blocos de texto com perfil de digitação humano
     if blocos is None:
         blocos = config.BLOCOS
     d_min = delay_min if delay_min is not None else config.DELAY_MIN
@@ -406,7 +416,7 @@ def enviar_para(nome: str, telefone: str, blocos: list | None = None,
         texto = bloco.format(nome=nome)
         if progress_callback:
             progress_callback(index + 1, len(blocos), texto)
-        send_text(texto)
+        send_text(texto, typing_profile=typing_profile)
         if index < len(blocos) - 1:
             delay = random.uniform(d_min, d_max)
             logger.info("Contato=%s bloco=%d/%d delay=%.1fs",

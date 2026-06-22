@@ -14,6 +14,7 @@ from PIL import Image as PILImage
 
 import config
 import icons as ic
+from anti_ban import DailyStats, parse_spin
 from whatsapp_sender import (InvalidWhatsAppNumberError, enviar_para,
                              read_contacts, validate_phone)
 
@@ -300,6 +301,20 @@ class WhatsAppPanel(ctk.CTk):
         self.live_msg_var     = tk.StringVar(value="—")
         self.live_next_var    = tk.StringVar(value="—")
 
+        # Configurações anti-bloqueio
+        self.daily_limit_enabled  = tk.BooleanVar(value=False)
+        self.daily_limit_var      = tk.StringVar(value="50")
+        self.warmup_enabled       = tk.BooleanVar(value=False)
+        self.human_hours_enabled  = tk.BooleanVar(value=False)
+        self.hours_start_var      = tk.StringVar(value="08:00")
+        self.hours_end_var        = tk.StringVar(value="20:00")
+        self.typing_profile_var   = tk.StringVar(value="aleatorio")
+        self.session_split_enabled= tk.BooleanVar(value=False)
+        self.session_size_var     = tk.StringVar(value="30")
+        self.session_pause_var    = tk.StringVar(value="30")
+        self._consecutive_errors  = 0
+        self._daily_stats         = DailyStats(_user_data_dir())
+
         self.blocos = self._load_messages()
 
         _style_treeview()
@@ -417,7 +432,8 @@ class WhatsAppPanel(ctk.CTk):
         banner.grid(row=0, column=0, sticky="ew", padx=16, pady=(16, 12))
         ctk.CTkLabel(banner,
                      text="Configure aqui o que sera enviado para cada contato.\n"
-                          "Cada bloco e uma mensagem separada. Use {nome} para personalizar.",
+                          "Cada bloco e uma mensagem separada. Use {nome} para personalizar. "
+                          "Use [opcao1/opcao2/opcao3] para variar o texto automaticamente.",
                      font=("Segoe UI", 13), text_color=C["subtext"],
                      justify="left").pack(side="left", padx=16, pady=14)
 
@@ -763,11 +779,75 @@ class WhatsAppPanel(ctk.CTk):
         right = ctk.CTkFrame(parent, fg_color="transparent")
         right.grid(row=0, column=1, sticky="nsew")
         right.columnconfigure(0, weight=1)
-        right.rowconfigure(5, weight=1)
+        right.rowconfigure(6, weight=1)
+
+        # ── Proteção Anti-Bloqueio ────────────────────────────────────────────
+        ab = ctk.CTkFrame(right, fg_color=C["surface"], corner_radius=14)
+        ab.grid(row=0, column=0, sticky="ew", pady=(0, 12))
+        ab.columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(ab, text="Protecao Anti-Bloqueio",
+                     font=("Segoe UI", 13, "bold"), text_color=C["text"]).grid(
+            row=0, column=0, sticky="w", padx=16, pady=(12, 8))
+
+        # Linha 1: Limite diário + Warm-up
+        r1 = ctk.CTkFrame(ab, fg_color="transparent")
+        r1.grid(row=1, column=0, sticky="ew", padx=16, pady=(0, 6))
+
+        ctk.CTkSwitch(r1, text="Limite diario:", variable=self.daily_limit_enabled,
+                      font=("Segoe UI", 11), width=46).pack(side="left")
+        ctk.CTkEntry(r1, textvariable=self.daily_limit_var, width=52, height=30,
+                     corner_radius=6, font=("Segoe UI", 11)).pack(side="left", padx=4)
+        ctk.CTkLabel(r1, text="envios/dia", font=("Segoe UI", 11),
+                     text_color=C["subtext"]).pack(side="left", padx=(0, 14))
+        ctk.CTkSwitch(r1, text="Modo aquecimento", variable=self.warmup_enabled,
+                      font=("Segoe UI", 11), width=46).pack(side="left")
+
+        # Linha 2: Horário humano
+        r2 = ctk.CTkFrame(ab, fg_color="transparent")
+        r2.grid(row=2, column=0, sticky="ew", padx=16, pady=(0, 6))
+
+        ctk.CTkSwitch(r2, text="Horario humano:", variable=self.human_hours_enabled,
+                      font=("Segoe UI", 11), width=46).pack(side="left")
+        ctk.CTkEntry(r2, textvariable=self.hours_start_var, width=62, height=30,
+                     corner_radius=6, font=("Segoe UI", 11)).pack(side="left", padx=4)
+        ctk.CTkLabel(r2, text="ate", font=("Segoe UI", 11),
+                     text_color=C["subtext"]).pack(side="left", padx=4)
+        ctk.CTkEntry(r2, textvariable=self.hours_end_var, width=62, height=30,
+                     corner_radius=6, font=("Segoe UI", 11)).pack(side="left", padx=(4, 0))
+
+        # Linha 3: Velocidade de digitação
+        r3 = ctk.CTkFrame(ab, fg_color="transparent")
+        r3.grid(row=3, column=0, sticky="ew", padx=16, pady=(0, 6))
+        ctk.CTkLabel(r3, text="Velocidade de digitacao:",
+                     font=("Segoe UI", 11), text_color=C["subtext"]).pack(side="left", padx=(0, 8))
+        ctk.CTkSegmentedButton(r3, values=["Lenta", "Media", "Rapida", "Aleatorio"],
+                               variable=self.typing_profile_var,
+                               font=("Segoe UI", 10)).pack(side="left")
+
+        # Linha 4: Divisão em sessões
+        r4 = ctk.CTkFrame(ab, fg_color="transparent")
+        r4.grid(row=4, column=0, sticky="ew", padx=16, pady=(0, 12))
+        ctk.CTkSwitch(r4, text="Sessoes:", variable=self.session_split_enabled,
+                      font=("Segoe UI", 11), width=46).pack(side="left")
+        ctk.CTkEntry(r4, textvariable=self.session_size_var, width=52, height=30,
+                     corner_radius=6, font=("Segoe UI", 11)).pack(side="left", padx=4)
+        ctk.CTkLabel(r4, text="por sessao, pausa de",
+                     font=("Segoe UI", 11), text_color=C["subtext"]).pack(side="left", padx=(0, 4))
+        ctk.CTkEntry(r4, textvariable=self.session_pause_var, width=52, height=30,
+                     corner_radius=6, font=("Segoe UI", 11)).pack(side="left", padx=4)
+        ctk.CTkLabel(r4, text="min", font=("Segoe UI", 11),
+                     text_color=C["subtext"]).pack(side="left")
+
+        # Linha de status do warm-up
+        self.warmup_status_var = tk.StringVar(value=self._daily_stats.status_line())
+        ctk.CTkLabel(ab, textvariable=self.warmup_status_var,
+                     font=("Segoe UI", 10), text_color=C["subtext"]).grid(
+            row=5, column=0, sticky="w", padx=16, pady=(0, 10))
 
         # ── Configuração de tempo ─────────────────────────────────────────────
         delay_card = ctk.CTkFrame(right, fg_color=C["surface"], corner_radius=14)
-        delay_card.grid(row=0, column=0, sticky="ew", pady=(0, 12))
+        delay_card.grid(row=1, column=0, sticky="ew", pady=(0, 12))
         delay_card.columnconfigure(0, weight=1)
 
         ctk.CTkLabel(delay_card, text="Configuracao de Tempo",
@@ -831,7 +911,7 @@ class WhatsAppPanel(ctk.CTk):
 
         # Cards de estatísticas (2x2)
         cards = ctk.CTkFrame(right, fg_color="transparent")
-        cards.grid(row=1, column=0, sticky="ew", pady=(0, 12))
+        cards.grid(row=2, column=0, sticky="ew", pady=(0, 12))
         cards.columnconfigure(0, weight=1)
         cards.columnconfigure(1, weight=1)
 
@@ -846,7 +926,7 @@ class WhatsAppPanel(ctk.CTk):
 
         # ── Status ao vivo ────────────────────────────────────────────────────
         live = ctk.CTkFrame(right, fg_color=C["surface"], corner_radius=14)
-        live.grid(row=2, column=0, sticky="ew", pady=(0, 12))
+        live.grid(row=3, column=0, sticky="ew", pady=(0, 12))
         live.columnconfigure(0, weight=1)
 
         ctk.CTkLabel(live, text="Enviando agora",
@@ -871,7 +951,7 @@ class WhatsAppPanel(ctk.CTk):
 
         # Progresso
         prog = ctk.CTkFrame(right, fg_color=C["surface"], corner_radius=14)
-        prog.grid(row=3, column=0, sticky="ew", pady=(0, 12))
+        prog.grid(row=4, column=0, sticky="ew", pady=(0, 12))
         prog.columnconfigure(0, weight=1)
 
         self.summary_var = tk.StringVar(value="0 / 0 concluidos")
@@ -886,7 +966,7 @@ class WhatsAppPanel(ctk.CTk):
 
         # Botões de controle
         ctrl = ctk.CTkFrame(right, fg_color=C["surface"], corner_radius=14)
-        ctrl.grid(row=4, column=0, sticky="ew", pady=(0, 12))
+        ctrl.grid(row=5, column=0, sticky="ew", pady=(0, 12))
         ctrl.columnconfigure(0, weight=1)
 
         ctk.CTkLabel(ctrl, text="Controle de Envio",
@@ -919,7 +999,7 @@ class WhatsAppPanel(ctk.CTk):
 
         # Log
         log_card = ctk.CTkFrame(right, fg_color=C["surface"], corner_radius=14)
-        log_card.grid(row=5, column=0, sticky="nsew")
+        log_card.grid(row=6, column=0, sticky="nsew")
         log_card.columnconfigure(0, weight=1)
         log_card.rowconfigure(1, weight=1)
 
@@ -1279,16 +1359,50 @@ class WhatsAppPanel(ctk.CTk):
         self._set_status("Parando envio...")
         self._log_safe("Solicitacao de parada enviada.")
 
+    def _is_human_hour(self) -> bool:
+        if not self.human_hours_enabled.get():
+            return True
+        from datetime import datetime as _dt
+        now = _dt.now()
+        try:
+            sh, sm = map(int, self.hours_start_var.get().split(":"))
+            eh, em = map(int, self.hours_end_var.get().split(":"))
+            start = now.replace(hour=sh, minute=sm, second=0, microsecond=0)
+            end   = now.replace(hour=eh, minute=em, second=0, microsecond=0)
+            return start <= now <= end
+        except Exception:
+            return True
+
+    def _effective_daily_limit(self) -> int:
+        if self.warmup_enabled.get():
+            return self._daily_stats.warmup_limit()
+        if self.daily_limit_enabled.get():
+            try:
+                return int(self.daily_limit_var.get())
+            except ValueError:
+                return 0
+        return 0
+
     def _send_all(self):
         blocos     = list(self.blocos)
         image_path = self.image_path
         total      = len(self.contacts)
+        profile    = self.typing_profile_var.get().lower()
 
         if self.delay_mode.get() == "fixo":
             d_min = d_max = float(self.delay_fixo_var.get())
         else:
             d_min = float(self.delay_min_var.get())
             d_max = float(self.delay_max_var.get())
+
+        try:
+            session_size  = int(self.session_size_var.get())  if self.session_split_enabled.get() else 0
+            session_pause = int(self.session_pause_var.get()) if self.session_split_enabled.get() else 0
+        except ValueError:
+            session_size = session_pause = 0
+
+        self._consecutive_errors = 0
+        sent_this_session = 0
 
         for index, item in enumerate(self.contacts):
             if self.stop_requested:
@@ -1298,15 +1412,49 @@ class WhatsAppPanel(ctk.CTk):
             if self.stop_requested:
                 break
 
+            # ── Checagens anti-ban antes de cada contato ──────────────────────
+
+            # Horário humano
+            if not self._is_human_hour():
+                self._log_safe("Fora do horario configurado. Envio pausado automaticamente.")
+                self._set_status("Fora do horario humano")
+                while not self._is_human_hour() and not self.stop_requested:
+                    time.sleep(60)
+                if self.stop_requested:
+                    break
+                self._log_safe("Dentro do horario. Retomando...")
+
+            # Limite diário
+            limit = self._effective_daily_limit()
+            if limit > 0 and not self._daily_stats.can_send(limit):
+                self._log_safe(f"Limite diario de {limit} envios atingido. Parando.")
+                self._set_status("Limite diario atingido")
+                break
+
+            # Pausa entre sessões
+            if session_size > 0 and sent_this_session > 0 and sent_this_session % session_size == 0:
+                self._log_safe(f"Sessao de {session_size} concluida. Pausa de {session_pause} min...")
+                self._set_status(f"Pausa entre sessoes ({session_pause} min)")
+                self.after(0, lambda: self.live_contact_var.set("Pausa entre sessoes"))
+                time.sleep(session_pause * 60)
+                self._log_safe("Retomando proxima sessao...")
+
+            # ── Erros consecutivos ────────────────────────────────────────────
+            if self._consecutive_errors >= 3:
+                self._log_safe("3 erros consecutivos detectados. Pausando 5 min por seguranca...")
+                self._set_status("Pausa automatica — muitos erros")
+                time.sleep(300)
+                self._consecutive_errors = 0
+
+            # ── Envio ─────────────────────────────────────────────────────────
             nome     = item["nome"]
             telefone = item["telefone"]
 
-            # Próximo contato na fila
             if index + 1 < total:
-                proximo = self.contacts[index + 1]["nome"]
-                avg_pause = (float(self.pause_min_var.get()) + float(self.pause_max_var.get())) / 2
+                proximo  = self.contacts[index + 1]["nome"]
                 avg_block = (d_min + d_max) / 2
-                eta = int(len(blocos) * avg_block + avg_pause + 6)
+                avg_pause = (float(self.pause_min_var.get()) + float(self.pause_max_var.get())) / 2
+                eta = int(len(blocos) * avg_block + avg_pause + 8)
                 self.after(0, lambda n=proximo, s=eta: self.live_next_var.set(
                     f"Proximo: {n}  (~{self._format_time(s)})"))
             else:
@@ -1315,34 +1463,47 @@ class WhatsAppPanel(ctk.CTk):
             self.after(0, lambda n=nome: self.live_contact_var.set(n))
             self.after(0, lambda: self.live_msg_var.set("Abrindo conversa..."))
             self._update_item_status(index, "Enviando")
-            self._log_safe(f"[{index + 1}/{total}] Enviando para {nome}...")
+            self._log_safe(f"[{index + 1}/{total}] Enviando para {nome} | perfil: {profile}")
 
-            def _msg_callback(bloco_idx, bloco_total, texto, n=nome):
-                preview = texto[:60] + ("..." if len(texto) > 60 else "")
+            # Aplica spin text em cada bloco antes de enviar
+            blocos_spin = [parse_spin(b) for b in blocos]
+
+            def _msg_callback(bloco_idx, bloco_total, texto):
+                preview = texto[:55] + ("..." if len(texto) > 55 else "")
                 self.after(0, lambda: self.live_msg_var.set(
                     f"Mensagem {bloco_idx}/{bloco_total}:\n\"{preview}\""))
-                self._log_safe(f"  Mensagem {bloco_idx}/{bloco_total}: {preview}")
+                self._log_safe(f"  Msg {bloco_idx}/{bloco_total}: {preview}")
 
             try:
-                enviar_para(nome, telefone, blocos, image_path,
+                enviar_para(nome, telefone, blocos_spin, image_path,
                             delay_min=d_min, delay_max=d_max,
-                            progress_callback=_msg_callback)
+                            progress_callback=_msg_callback,
+                            typing_profile=profile)
                 self._update_item_status(index, "Enviado")
                 self._log_safe(f"[{index + 1}/{total}] Concluido: {nome}")
+                self._daily_stats.register_send()
+                self.after(0, lambda: self.warmup_status_var.set(
+                    self._daily_stats.status_line()))
+                self._consecutive_errors = 0
+                sent_this_session += 1
+
             except InvalidWhatsAppNumberError:
                 self._update_item_status(index, "Falha")
                 self._log_safe(f"[{index + 1}/{total}] Sem WhatsApp: {nome} — pulando.")
+                self._consecutive_errors += 1
+
             except Exception as exc:
                 self._update_item_status(index, "Falha")
                 self._log_safe(f"[{index + 1}/{total}] Erro com {nome}: {exc}")
+                self._consecutive_errors += 1
 
-            # Pausa entre contatos com countdown no status ao vivo
+            # Pausa entre contatos
             if index < total - 1 and not self.stop_requested:
                 pausa = self._get_pause_delay()
                 self._log_safe(f"Aguardando {pausa:.0f}s antes do proximo contato...")
                 self.after(0, lambda: self.live_contact_var.set("Aguardando..."))
                 self.after(0, lambda s=int(pausa): self.live_msg_var.set(
-                    f"Proximo contato em {self._format_time(s)}"))
+                    f"Proximo em {self._format_time(s)}"))
                 time.sleep(pausa)
 
         self.running = False
