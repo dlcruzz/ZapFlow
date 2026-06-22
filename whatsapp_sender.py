@@ -254,8 +254,17 @@ def focus_whatsapp_window() -> None:
 
 def _click_message_input() -> None:
     """
-    Garante que o campo de mensagem do WhatsApp está focado.
-    Usa Win32 SetForegroundWindow + clique preciso na posição do input.
+    Clica no campo de texto de mensagem do WhatsApp Desktop.
+
+    Layout da janela:
+      ├── Painel esquerdo (contatos): ~30% da largura
+      └── Painel direito (chat):      ~70% da largura
+            └── Barra inferior: [😊][+] [campo de texto...........] [🎤]
+                  Os botões de emoji/anexo ficam nos primeiros ~8% do painel direito.
+                  O campo de texto começa em ~38% e vai até ~90% da largura total.
+                  Ponto seguro: 65% da largura total (bem no meio do campo).
+
+    Usar w.width // 2 (50%) cai em cima dos botões de emoji/anexo — errado.
     """
     windows = gw.getWindowsWithTitle("WhatsApp")
     if not windows:
@@ -266,23 +275,30 @@ def _click_message_input() -> None:
         w.restore()
         time.sleep(0.8)
 
-    # Força o WhatsApp para o foreground via Win32
     _force_whatsapp_foreground()
     time.sleep(0.5)
 
-    # Campo de mensagem: centro horizontal, ~68px acima do rodapé
-    x = w.left + w.width // 2
-    y = w.top + w.height - 68
-    pyautogui.click(x, y)
-    time.sleep(0.4)
+    # X: 65% da largura total → bem no meio do campo de texto
+    # Y: 75px acima do rodapé → dentro da barra de mensagem
+    x = w.left + int(w.width * 0.65)
+    y = w.top + w.height - 75
 
-    # Verifica se o foco realmente está no WhatsApp
+    pyautogui.click(x, y)
+    time.sleep(0.3)
+
+    # Fecha qualquer menu/popup que possa ter aberto acidentalmente
+    pyautogui.press("escape")
+    time.sleep(0.3)
+
+    # Se o foco escapou, refoca e tenta novamente
     if not _is_whatsapp_focused():
-        logger.warning("WhatsApp nao esta em foco apos o clique — tentando novamente.")
+        logger.warning("WhatsApp nao focado apos clique — refocando.")
         _force_whatsapp_foreground()
         time.sleep(0.3)
         pyautogui.click(x, y)
-        time.sleep(0.4)
+        time.sleep(0.3)
+        pyautogui.press("escape")
+        time.sleep(0.2)
 
 
 def _detect_and_dismiss_dialog() -> bool:
@@ -476,10 +492,8 @@ def enviar_para(nome: str, telefone: str, blocos: list | None = None,
         )
 
     # 5. Garante foco no campo de mensagem
-    _click_message_input()
-
-    # 6. Simula leitura da conversa anterior (comportamento humano)
-    _simulate_reading()
+    #    _simulate_reading() foi removido do fluxo — o scroll deslocava
+    #    o foco e causava cliques nos botoes errados da barra de mensagem.
     _click_message_input()
 
     # 7. Envia imagem se houver
