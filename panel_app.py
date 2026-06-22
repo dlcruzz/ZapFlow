@@ -15,6 +15,9 @@ from PIL import Image as PILImage
 import config
 import icons as ic
 from anti_ban import DailyStats, parse_spin
+from instagram_sender import (InstagramDMError, InstagramLoginError,
+                               InstagramUserNotFound, chrome_profile_padrao,
+                               criar_driver, enviar_instagram, verificar_login)
 from theme import T, F, STATUS
 from whatsapp_sender import (InvalidWhatsAppNumberError, enviar_para,
                              read_contacts, validate_phone)
@@ -410,7 +413,7 @@ class OnboardingOverlay(ctk.CTkFrame):
 # ─────────────────────────────────────────────────────────────────────────────
 
 class WhatsAppPanel(ctk.CTk):
-    PAGES = ["mensagens", "contatos", "tempo", "antibloqueio", "monitoramento"]
+    PAGES = ["mensagens", "contatos", "tempo", "antibloqueio", "monitoramento", "instagram"]
 
     def __init__(self):
         super().__init__()
@@ -468,6 +471,14 @@ class WhatsAppPanel(ctk.CTk):
         self.live_msg_var      = tk.StringVar(value="—")
         self.live_next_var     = tk.StringVar(value="—")
         self.warmup_status_var = tk.StringVar(value=self._daily_stats.status_line())
+
+        # Instagram
+        self._ig_driver = None
+        self.ig_running  = False
+        self.ig_stop     = False
+        self.ig_chrome_var  = tk.StringVar(value=chrome_profile_padrao())
+        self.ig_profile_var = tk.StringVar(value="Default")
+        self.ig_status_var  = tk.StringVar(value="Pronto")
 
         # Entrada em massa
         self.name_var  = tk.StringVar()
@@ -605,6 +616,7 @@ class WhatsAppPanel(ctk.CTk):
             ("tempo",         "Tempo & Delay",   ic.clock(18)),
             ("antibloqueio",  "Anti-Bloqueio",   ic.shield(18)),
             ("monitoramento", "Monitoramento",   ic.chart(18)),
+            ("instagram",     "Instagram DM",    ic.camera(18)),
         ]
 
         self._nav_btns: dict[str, SidebarBtn] = {}
@@ -647,6 +659,7 @@ class WhatsAppPanel(ctk.CTk):
             "tempo":         self._build_page_timing,
             "antibloqueio":  self._build_page_antiblock,
             "monitoramento": self._build_page_monitoring,
+            "instagram":     self._build_page_instagram,
         }
         for key, builder in builders.items():
             frame = ctk.CTkScrollableFrame(self._content, fg_color=T["bg_base"],
@@ -1280,6 +1293,285 @@ class WhatsAppPanel(ctk.CTk):
                                        state="disabled", wrap="word",
                                        border_color=T["border"], border_width=1)
         self.log_box.grid(row=1, column=0, sticky="nsew", padx=12, pady=(8, 12))
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Onboarding
+    # ──────────────────────────────────────────────────────────────────────────
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Página: Instagram DM
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def _build_page_instagram(self, parent):
+        hdr = _section_header(parent, "Instagram DM",
+                               "Envie mensagens diretas para clientes no Instagram via Chrome.")
+        hdr.pack(fill="x", padx=32, pady=(28, 20))
+
+        # ── Configuração do Chrome ────────────────────────────────────────────
+        chrome_card = _card(parent)
+        chrome_card.pack(fill="x", padx=32, pady=(0, 12))
+
+        ctk.CTkLabel(chrome_card, text="Perfil do Chrome",
+                     font=F["subhead"], text_color=T["text_1"]).pack(
+            anchor="w", padx=16, pady=(14, 4))
+        ctk.CTkLabel(chrome_card,
+                     text="O Chrome abrirá usando seu perfil para aproveitar o login já existente no Instagram.",
+                     font=F["body_sm"], text_color=T["text_3"]).pack(
+            anchor="w", padx=16, pady=(0, 10))
+
+        path_row = ctk.CTkFrame(chrome_card, fg_color="transparent")
+        path_row.pack(fill="x", padx=16, pady=(0, 8))
+        path_row.columnconfigure(0, weight=1)
+
+        ctk.CTkEntry(path_row, textvariable=self.ig_chrome_var,
+                     height=36, corner_radius=T["r_btn"], font=F["body_sm"],
+                     fg_color=T["bg_elevated"], border_color=T["border"]).grid(
+            row=0, column=0, sticky="ew", padx=(0, 8))
+        ctk.CTkButton(path_row, text="Detectar", command=self._ig_detect_chrome,
+                      width=90, height=36, corner_radius=T["r_btn"], font=F["body"],
+                      fg_color=T["bg_elevated"], hover_color=T["bg_hover"]).grid(
+            row=0, column=1)
+
+        profile_row = ctk.CTkFrame(chrome_card, fg_color="transparent")
+        profile_row.pack(anchor="w", padx=16, pady=(0, 14))
+        ctk.CTkLabel(profile_row, text="Diretório do perfil:",
+                     font=F["label"], text_color=T["text_3"]).pack(side="left", padx=(0, 8))
+        ctk.CTkEntry(profile_row, textvariable=self.ig_profile_var,
+                     width=120, height=32, corner_radius=T["r_btn"], font=F["mono"],
+                     fg_color=T["bg_elevated"], border_color=T["border"],
+                     placeholder_text="Default").pack(side="left")
+        ctk.CTkLabel(profile_row,
+                     text="  (geralmente 'Default' ou 'Profile 1')",
+                     font=F["label_sm"], text_color=T["text_3"]).pack(side="left")
+
+        # ── Usuários ──────────────────────────────────────────────────────────
+        users_card = _card(parent)
+        users_card.pack(fill="x", padx=32, pady=(0, 12))
+
+        ctk.CTkLabel(users_card, text="Usuários do Instagram",
+                     font=F["subhead"], text_color=T["text_1"]).pack(
+            anchor="w", padx=16, pady=(14, 4))
+        ctk.CTkLabel(users_card,
+                     text="Cole os @usernames, um por linha. O @ é opcional.",
+                     font=F["body_sm"], text_color=T["text_3"]).pack(
+            anchor="w", padx=16, pady=(0, 8))
+
+        self.ig_users_box = ctk.CTkTextbox(users_card, height=120, corner_radius=T["r_btn"],
+                                            fg_color=T["bg_elevated"], text_color=T["text_1"],
+                                            font=F["mono"], border_color=T["border"],
+                                            border_width=1)
+        self.ig_users_box.pack(fill="x", padx=16, pady=(0, 14))
+
+        # ── Mensagens ─────────────────────────────────────────────────────────
+        msg_card = _card(parent)
+        msg_card.pack(fill="x", padx=32, pady=(0, 12))
+
+        ctk.CTkLabel(msg_card, text="Mensagens",
+                     font=F["subhead"], text_color=T["text_1"]).pack(
+            anchor="w", padx=16, pady=(14, 4))
+        ctk.CTkLabel(msg_card,
+                     text="Use {nome} para personalizar. Cada bloco = uma mensagem separada.",
+                     font=F["body_sm"], text_color=T["text_3"]).pack(
+            anchor="w", padx=16, pady=(0, 8))
+
+        self.ig_msg_scroll = ctk.CTkScrollableFrame(msg_card, fg_color="transparent",
+                                                     height=200)
+        self.ig_msg_scroll.pack(fill="x", padx=16, pady=(0, 8))
+        self.ig_msg_scroll.columnconfigure(0, weight=1)
+        self.ig_msg_widgets: list[ctk.CTkTextbox] = []
+
+        msg_btns = ctk.CTkFrame(msg_card, fg_color="transparent")
+        msg_btns.pack(anchor="w", padx=16, pady=(0, 14))
+        ctk.CTkButton(msg_btns, text="+ Mensagem", image=ic.add(16), compound="left",
+                      command=self._ig_add_msg,
+                      height=34, corner_radius=T["r_btn"], font=F["body"],
+                      fg_color=T["accent"], hover_color=T["accent_hover"]).pack(
+            side="left", padx=(0, 8))
+        ctk.CTkButton(msg_btns, text="Limpar tudo", image=ic.trash(16), compound="left",
+                      command=self._ig_clear_msgs,
+                      height=34, corner_radius=T["r_btn"], font=F["body"],
+                      fg_color=T["bg_elevated"], hover_color=T["bg_hover"]).pack(side="left")
+
+        # Bloco inicial
+        self._ig_add_msg("Olá {nome}, tudo bem?")
+
+        # ── Controles ─────────────────────────────────────────────────────────
+        ctrl = ctk.CTkFrame(parent, fg_color="transparent")
+        ctrl.pack(fill="x", padx=32, pady=(0, 12))
+
+        ctk.CTkButton(ctrl, text="INICIAR INSTAGRAM",
+                      image=ic.play(18), compound="left",
+                      command=self._ig_start,
+                      height=48, corner_radius=T["r_btn"], font=F["heading"],
+                      fg_color="#E1306C", hover_color="#C1215C").pack(
+            side="left", padx=(0, 12))
+
+        ctk.CTkButton(ctrl, text="Parar",
+                      image=ic.stop(16), compound="left",
+                      command=self._ig_stop,
+                      height=48, corner_radius=T["r_btn"], font=F["subhead"],
+                      fg_color=T["danger"], hover_color="#D93535").pack(side="left")
+
+        ctk.CTkLabel(ctrl, textvariable=self.ig_status_var,
+                     font=F["body"], text_color=T["accent"]).pack(
+            side="left", padx=20)
+
+        # ── Log ───────────────────────────────────────────────────────────────
+        log_card = _card(parent)
+        log_card.pack(fill="both", expand=True, padx=32, pady=(0, 24))
+        log_card.columnconfigure(0, weight=1)
+        log_card.rowconfigure(1, weight=1)
+
+        ctk.CTkLabel(log_card, text="Log do Instagram",
+                     font=F["subhead"], text_color=T["text_1"]).grid(
+            row=0, column=0, sticky="w", padx=16, pady=(14, 0))
+
+        self.ig_log_box = ctk.CTkTextbox(log_card, font=F["mono_sm"], corner_radius=T["r_btn"],
+                                          fg_color=T["bg_elevated"], text_color=T["text_2"],
+                                          state="disabled", wrap="word",
+                                          border_color=T["border"], border_width=1)
+        self.ig_log_box.grid(row=1, column=0, sticky="nsew", padx=12, pady=(8, 12))
+
+    def _ig_detect_chrome(self):
+        path = chrome_profile_padrao()
+        self.ig_chrome_var.set(path)
+
+    def _ig_add_msg(self, text: str = ""):
+        idx = len(self.ig_msg_widgets) + 1
+        frame = _card(self.ig_msg_scroll)
+        frame.grid(row=idx - 1, column=0, sticky="ew", pady=(0, 8))
+        frame.columnconfigure(0, weight=1)
+
+        header = ctk.CTkFrame(frame, fg_color="transparent")
+        header.pack(fill="x", padx=12, pady=(10, 0))
+        header.columnconfigure(0, weight=1)
+        ctk.CTkLabel(header, text=f"Mensagem {idx}", font=F["label"],
+                     text_color=T["accent"]).pack(side="left")
+
+        def _rm(f=frame, widgets=self.ig_msg_widgets):
+            if box in widgets:
+                widgets.remove(box)
+            f.destroy()
+
+        ctk.CTkButton(header, text="", image=ic.close(12), command=_rm,
+                      width=26, height=26, corner_radius=T["r_btn"],
+                      fg_color=T["danger"] + "55" if False else "#3D1010",
+                      hover_color=T["danger"]).pack(side="right")
+
+        box = ctk.CTkTextbox(frame, height=70, corner_radius=T["r_btn"],
+                             fg_color=T["bg_elevated"], text_color=T["text_1"],
+                             font=F["body"], border_color=T["border"], border_width=1)
+        box.pack(fill="x", padx=12, pady=(4, 10))
+        box.insert("0.0", text if text else "Coloque sua mensagem aqui")
+        self.ig_msg_widgets.append(box)
+
+    def _ig_clear_msgs(self):
+        for widget in self.ig_msg_scroll.winfo_children():
+            widget.destroy()
+        self.ig_msg_widgets.clear()
+        self._ig_add_msg()
+
+    def _ig_log(self, msg: str):
+        self.ig_log_box.configure(state="normal")
+        self.ig_log_box.insert(tk.END, f"[{datetime.now().strftime('%H:%M:%S')}] {msg}\n")
+        self.ig_log_box.see(tk.END)
+        self.ig_log_box.configure(state="disabled")
+
+    def _ig_log_safe(self, msg: str):
+        self.after(0, lambda: self._ig_log(msg))
+
+    def _ig_stop(self):
+        self.ig_stop = True
+        self.ig_status_var.set("Parando...")
+        self._ig_log_safe("Parada solicitada.")
+
+    def _ig_start(self):
+        if self.ig_running:
+            return
+
+        # Coleta usuários
+        raw = self.ig_users_box.get("0.0", "end").strip().splitlines()
+        usernames = [u.strip().lstrip("@") for u in raw if u.strip()]
+        if not usernames:
+            messagebox.showwarning("Aviso", "Cole pelo menos um @username.")
+            return
+
+        # Coleta mensagens
+        messages = [box.get("0.0", "end").strip()
+                    for box in self.ig_msg_widgets
+                    if box.get("0.0", "end").strip()]
+        if not messages:
+            messagebox.showwarning("Aviso", "Adicione pelo menos uma mensagem.")
+            return
+
+        self.ig_running = True
+        self.ig_stop    = False
+        self.ig_status_var.set("Iniciando Chrome...")
+        threading.Thread(
+            target=self._ig_send_all,
+            args=(usernames, messages),
+            daemon=True
+        ).start()
+
+    def _ig_send_all(self, usernames: list[str], messages: list[str]):
+        chrome_path = self.ig_chrome_var.get().strip()
+        profile_dir = self.ig_profile_var.get().strip() or "Default"
+        total       = len(usernames)
+
+        try:
+            self._ig_log_safe("Abrindo Chrome com seu perfil...")
+            self._ig_driver = criar_driver(chrome_path, profile_dir)
+
+            self._ig_log_safe("Verificando login no Instagram...")
+            verificar_login(self._ig_driver)
+            self._ig_log_safe("Login confirmado. Iniciando envios...")
+        except InstagramLoginError as e:
+            self._ig_log_safe(f"ERRO DE LOGIN: {e}")
+            self.after(0, lambda: messagebox.showerror("Instagram", str(e)))
+            self.ig_running = False
+            self.after(0, lambda: self.ig_status_var.set("Erro de login"))
+            return
+        except Exception as e:
+            self._ig_log_safe(f"Erro ao abrir Chrome: {e}")
+            self.after(0, lambda: messagebox.showerror("Erro", str(e)))
+            self.ig_running = False
+            self.after(0, lambda: self.ig_status_var.set("Erro"))
+            return
+
+        for idx, username in enumerate(usernames):
+            if self.ig_stop:
+                break
+
+            self._ig_log_safe(f"[{idx + 1}/{total}] Enviando para @{username}...")
+            self.after(0, lambda u=username: self.ig_status_var.set(f"Enviando → @{u}"))
+
+            def _cb(bi, bt, texto, u=username):
+                pv = texto[:50] + ("..." if len(texto) > 50 else "")
+                self._ig_log_safe(f"  Msg {bi}/{bt}: {pv}")
+
+            try:
+                enviar_instagram(username, messages, self._ig_driver, _cb)
+                self._ig_log_safe(f"[{idx + 1}/{total}] Concluído: @{username}")
+
+                if idx < total - 1 and not self.ig_stop:
+                    pausa = random.uniform(8, 20)
+                    self._ig_log_safe(f"Aguardando {pausa:.0f}s antes do próximo...")
+                    time.sleep(pausa)
+
+            except InstagramUserNotFound as e:
+                self._ig_log_safe(f"[{idx + 1}/{total}] Perfil não encontrado: @{username}")
+            except InstagramDMError as e:
+                self._ig_log_safe(f"[{idx + 1}/{total}] Erro DM @{username}: {e}")
+            except Exception as e:
+                self._ig_log_safe(f"[{idx + 1}/{total}] Erro @{username}: {e}")
+
+        self.ig_running = False
+        status = "Concluído" if not self.ig_stop else "Parado"
+        self.after(0, lambda: self.ig_status_var.set(status))
+        self._ig_log_safe(f"Processo finalizado — {status}.")
+
+        # Mantém o Chrome aberto para o usuário ver o resultado
+        self._ig_log_safe("Chrome permanece aberto. Feche manualmente quando quiser.")
 
     # ──────────────────────────────────────────────────────────────────────────
     # Onboarding

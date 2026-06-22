@@ -167,6 +167,18 @@ def check(s=_S):
     return _mk(draw, s)
 
 
+def camera(s=_S):
+    def draw(d, c):
+        m = s // 2
+        # corpo da câmera
+        d.rounded_rectangle([1, 4, s - 2, s - 2], radius=3, outline=c, width=2)
+        # lente
+        d.ellipse([m - 4, 6, m + 4, s - 4], outline=c, width=2)
+        # flash
+        d.rectangle([s - 6, 5, s - 3, 8], fill=c)
+    return _mk(draw, s)
+
+
 def send_icon(s=_S):
     def draw(d, c):
         d.polygon([(1, 1), (1, s - 2), (s - 2, s // 2)], fill=c)
