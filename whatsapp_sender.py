@@ -201,36 +201,88 @@ def open_chat_direct(phone: str) -> None:
     raise RuntimeError("Não foi possível abrir o chat do WhatsApp pelo link direto.")
 
 
+def _wa_hwnd() -> int:
+    """Retorna o HWND da janela principal do WhatsApp Desktop."""
+    return ctypes.windll.user32.FindWindowW(None, "WhatsApp")
+
+
+def _force_whatsapp_foreground() -> bool:
+    """
+    Força o WhatsApp para o foreground via Win32 API.
+    pygetwindow.activate() pode ser ignorado pelo Windows;
+    AttachThreadInput + SetForegroundWindow é muito mais confiável.
+    """
+    hwnd = _wa_hwnd()
+    if not hwnd:
+        return False
+    try:
+        user32 = ctypes.windll.user32
+        kernel32 = ctypes.windll.kernel32
+
+        curr_thread   = kernel32.GetCurrentThreadId()
+        target_thread = user32.GetWindowThreadProcessId(hwnd, None)
+
+        if curr_thread != target_thread:
+            user32.AttachThreadInput(curr_thread, target_thread, True)
+
+        user32.ShowWindow(hwnd, 9)       # SW_RESTORE
+        user32.BringWindowToTop(hwnd)
+        user32.SetForegroundWindow(hwnd)
+
+        if curr_thread != target_thread:
+            user32.AttachThreadInput(curr_thread, target_thread, False)
+
+        return True
+    except Exception as exc:
+        logger.warning("Falha ao forcar foco no WhatsApp: %s", exc)
+        return False
+
+
+def _is_whatsapp_focused() -> bool:
+    """Verifica se o WhatsApp é a janela ativa no momento."""
+    hwnd = ctypes.windll.user32.GetForegroundWindow()
+    length = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
+    buf = ctypes.create_unicode_buffer(length + 1)
+    ctypes.windll.user32.GetWindowTextW(hwnd, buf, length + 1)
+    return "WhatsApp" in buf.value
+
+
 def focus_whatsapp_window() -> None:
-    windows = gw.getWindowsWithTitle("WhatsApp")
-    if not windows:
-        return
-    target = windows[0]
-    if target.isMinimized:
-        target.restore()
-    target.activate()
+    _force_whatsapp_foreground()
     time.sleep(1.0)
 
 
 def _click_message_input() -> None:
-    """Clica no campo de mensagem do WhatsApp para garantir o foco correto."""
+    """
+    Garante que o campo de mensagem do WhatsApp está focado.
+    Usa Win32 SetForegroundWindow + clique preciso na posição do input.
+    """
     windows = gw.getWindowsWithTitle("WhatsApp")
     if not windows:
         raise RuntimeError("Janela do WhatsApp nao encontrada.")
     w = windows[0]
+
     if w.isMinimized:
         w.restore()
         time.sleep(0.8)
-    try:
-        w.activate()
-        time.sleep(0.5)
-    except Exception:
-        pass
-    # Campo de mensagem fica ~60px acima da base da janela, centro horizontal
-    x = w.left + w.width // 2
-    y = w.top + w.height - 60
-    pyautogui.click(x, y)
+
+    # Força o WhatsApp para o foreground via Win32
+    _force_whatsapp_foreground()
     time.sleep(0.5)
+
+    # Campo de mensagem: centro horizontal, ~68px acima do rodapé
+    x = w.left + w.width // 2
+    y = w.top + w.height - 68
+    pyautogui.click(x, y)
+    time.sleep(0.4)
+
+    # Verifica se o foco realmente está no WhatsApp
+    if not _is_whatsapp_focused():
+        logger.warning("WhatsApp nao esta em foco apos o clique — tentando novamente.")
+        _force_whatsapp_foreground()
+        time.sleep(0.3)
+        pyautogui.click(x, y)
+        time.sleep(0.4)
 
 
 def _detect_and_dismiss_dialog() -> bool:
@@ -291,21 +343,45 @@ def _send_raw_scan(scan: int) -> None:
 
 
 def _simulate_reading() -> None:
-    """Simula leitura da conversa antes de começar a digitar."""
-    scrolls = random.randint(1, 3)
-    for _ in range(scrolls):
-        pyautogui.scroll(random.randint(2, 5))
-        time.sleep(random.uniform(0.3, 0.9))
-    pyautogui.hotkey("ctrl", "end")
-    time.sleep(random.uniform(0.4, 1.0))
+    """
+    Simula leitura da conversa.
+    Garante que o WhatsApp está em foco ANTES de qualquer scroll,
+    evitando que o scroll vá para outra janela aberta.
+    """
+    windows = gw.getWindowsWithTitle("WhatsApp")
+    if not windows:
+        return
+    w = windows[0]
+
+    # Clica no CENTRO do chat (não no input) para focar a área de leitura
+    _force_whatsapp_foreground()
+    time.sleep(0.3)
+    chat_x = w.left + w.width // 2
+    chat_y = w.top + w.height // 2
+    pyautogui.click(chat_x, chat_y)
+    time.sleep(0.3)
+
+    # Scroll leve para cima — somente se o WhatsApp ainda estiver em foco
+    if _is_whatsapp_focused():
+        for _ in range(random.randint(1, 2)):
+            pyautogui.scroll(random.randint(2, 4))
+            time.sleep(random.uniform(0.2, 0.5))
+
+    time.sleep(random.uniform(0.3, 0.7))
 
 
 def send_text(text: str, typing_profile: str = "aleatorio") -> None:
     """
     Digita o texto caractere por caractere com perfil de velocidade humana.
-    Suporta unicode completo (emojis, acentos) via Windows SendInput.
+    Verifica o foco no WhatsApp antes de começar e a cada pausa longa.
     """
     p = get_profile(typing_profile)
+
+    # Garante foco antes de começar a digitar
+    if not _is_whatsapp_focused():
+        logger.warning("WhatsApp nao estava em foco antes de digitar — refocando.")
+        _force_whatsapp_foreground()
+        time.sleep(0.5)
 
     time.sleep(random.uniform(p["pre_send_min"] * 0.4, p["pre_send_min"]))
 
@@ -327,7 +403,13 @@ def send_text(text: str, typing_profile: str = "aleatorio") -> None:
             delay = random.uniform(p["char_min"], p["char_max"])
 
         if random.random() < p["think_chance"]:
-            delay += random.uniform(p["think_min"], p["think_max"])
+            extra = random.uniform(p["think_min"], p["think_max"])
+            time.sleep(extra)
+            # Após pausa longa, verifica se o foco ainda está no WhatsApp
+            if not _is_whatsapp_focused():
+                logger.warning("Foco perdido durante pausa — refocando.")
+                _force_whatsapp_foreground()
+                time.sleep(0.3)
 
         time.sleep(delay)
 
