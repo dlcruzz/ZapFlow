@@ -201,7 +201,7 @@ class WhatsAppPanel(ctk.CTk):
 
         _style_treeview()
         self._build_ui()
-        self.load_contacts_from_csv()
+        self._auto_load_csv()
 
     # ── Ícone ─────────────────────────────────────────────────────────────────
 
@@ -894,28 +894,57 @@ class WhatsAppPanel(ctk.CTk):
             self.log(f"Contato removido: {nome}")
 
     def load_contacts_from_csv(self):
+        path = filedialog.askopenfilename(
+            title="Selecionar arquivo de contatos",
+            filetypes=[("Arquivo CSV", "*.csv"), ("Todos os arquivos", "*.*")]
+        )
+        if not path:
+            return  # usuário cancelou
+
         try:
-            contatos = read_contacts(config.CSV_FILE)
+            contatos = read_contacts(path)
         except FileNotFoundError:
-            messagebox.showwarning("Arquivo nao encontrado",
-                                   f"Nao foi encontrado: {config.CSV_FILE}")
-            self.contacts = []
-            self.refresh_table()
+            messagebox.showwarning("Arquivo não encontrado", f"Não foi possível abrir: {path}")
             return
+        except Exception as exc:
+            messagebox.showerror("Erro ao ler CSV", str(exc))
+            return
+
         self.contacts = [{"nome": c["nome"], "telefone": c["telefone"], "status": "Pendente"}
                          for c in contatos]
         self.refresh_table()
-        self.log(f"Carregados {len(self.contacts)} contatos do CSV.")
+        self.log(f"{len(self.contacts)} contatos carregados de: {Path(path).name}")
+
+    def _auto_load_csv(self):
+        """Carrega silenciosamente o CSV padrão ao abrir o app (sem dialog)."""
+        default = _user_data_dir() / config.CSV_FILE
+        if not default.exists():
+            return
+        try:
+            contatos = read_contacts(str(default))
+            self.contacts = [{"nome": c["nome"], "telefone": c["telefone"], "status": "Pendente"}
+                             for c in contatos]
+            self.refresh_table()
+            self.log(f"{len(self.contacts)} contatos carregados automaticamente.")
+        except Exception:
+            pass
 
     def save_contacts_to_csv(self):
-        path = Path(config.CSV_FILE)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("w", encoding="utf-8", newline="") as f:
+        path = filedialog.asksaveasfilename(
+            title="Salvar lista de contatos",
+            defaultextension=".csv",
+            filetypes=[("Arquivo CSV", "*.csv"), ("Todos os arquivos", "*.*")],
+            initialfile="contatos.csv",
+        )
+        if not path:
+            return  # usuário cancelou
+
+        with open(path, "w", encoding="utf-8", newline="") as f:
             f.write("nome,telefone\n")
             for c in self.contacts:
                 f.write(f"{c['nome']},{c['telefone']}\n")
-        self.log(f"CSV salvo em {path}.")
-        messagebox.showinfo("Sucesso", "Lista salva no CSV.")
+        self.log(f"CSV salvo em: {Path(path).name}")
+        messagebox.showinfo("Sucesso", f"Lista salva em:\n{path}")
 
     def export_report(self):
         ts    = datetime.now().strftime("%Y%m%d_%H%M%S")
