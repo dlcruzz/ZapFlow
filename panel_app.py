@@ -563,6 +563,49 @@ class WhatsAppPanel(ctk.CTk):
                       fg_color=C["accent"], hover_color="#2563eb").grid(
             row=1, column=4, padx=(0, 16), pady=(0, 14))
 
+        # ── Colar em massa ────────────────────────────────────────────────────
+        ctk.CTkFrame(form_card, fg_color=C["border"], height=1).grid(
+            row=2, column=0, columnspan=5, sticky="ew", padx=16, pady=(0, 12))
+
+        ctk.CTkLabel(form_card, text="Colar em massa — cole uma coluna de nomes e uma de telefones:",
+                     font=("Segoe UI", 12, "bold"), text_color=C["text"]).grid(
+            row=3, column=0, columnspan=5, sticky="w", padx=16, pady=(0, 8))
+
+        mass = ctk.CTkFrame(form_card, fg_color="transparent")
+        mass.grid(row=4, column=0, columnspan=5, sticky="ew", padx=16, pady=(0, 6))
+        mass.columnconfigure(0, weight=1)
+        mass.columnconfigure(1, weight=1)
+
+        # Coluna Nomes
+        nc = ctk.CTkFrame(mass, fg_color="transparent")
+        nc.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        nc.columnconfigure(0, weight=1)
+        ctk.CTkLabel(nc, text="Nomes  (um por linha)",
+                     font=("Segoe UI", 11), text_color=C["subtext"]).grid(
+            row=0, column=0, sticky="w", pady=(0, 4))
+        self.mass_names = ctk.CTkTextbox(nc, height=110, corner_radius=8,
+                                         fg_color=C["bg"], text_color=C["text"],
+                                         font=("Segoe UI", 12))
+        self.mass_names.grid(row=1, column=0, sticky="ew")
+
+        # Coluna Telefones
+        pc = ctk.CTkFrame(mass, fg_color="transparent")
+        pc.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
+        pc.columnconfigure(0, weight=1)
+        ctk.CTkLabel(pc, text="Telefones  (um por linha)",
+                     font=("Segoe UI", 11), text_color=C["subtext"]).grid(
+            row=0, column=0, sticky="w", pady=(0, 4))
+        self.mass_phones = ctk.CTkTextbox(pc, height=110, corner_radius=8,
+                                          fg_color=C["bg"], text_color=C["text"],
+                                          font=("Segoe UI", 12))
+        self.mass_phones.grid(row=1, column=0, sticky="ew")
+
+        ctk.CTkButton(form_card, text="Adicionar Todos", image=ic.add(), compound="left",
+                      command=self.add_contacts_bulk,
+                      height=42, corner_radius=8, font=("Segoe UI", 12, "bold"),
+                      fg_color=C["success"], hover_color="#059669").grid(
+            row=5, column=0, columnspan=5, sticky="w", padx=16, pady=(8, 16))
+
         # Ações CSV
         csv_bar = ctk.CTkFrame(left, fg_color="transparent")
         csv_bar.grid(row=1, column=0, sticky="ew", pady=(0, 10))
@@ -860,6 +903,47 @@ class WhatsAppPanel(ctk.CTk):
         self.after(0, lambda: self.status_var.set(text))
 
     # ── Ações de contato ──────────────────────────────────────────────────────
+
+    def add_contacts_bulk(self):
+        names  = [n.strip() for n in self.mass_names.get("0.0", "end").splitlines() if n.strip()]
+        phones = [p.strip() for p in self.mass_phones.get("0.0", "end").splitlines() if p.strip()]
+
+        if not names or not phones:
+            messagebox.showwarning("Aviso", "Cole os nomes e os telefones antes de adicionar.")
+            return
+        if len(names) != len(phones):
+            messagebox.showwarning(
+                "Quantidades diferentes",
+                f"{len(names)} nome(s) e {len(phones)} telefone(s).\n"
+                "Verifique se cada linha tem um nome e um telefone correspondente."
+            )
+            return
+
+        added, errors = 0, []
+        for nome, telefone in zip(names, phones):
+            try:
+                self.contacts.append({
+                    "nome": nome,
+                    "telefone": validate_phone(telefone),
+                    "status": "Pendente"
+                })
+                added += 1
+            except Exception as exc:
+                errors.append(f"{nome} ({telefone}): {exc}")
+
+        self.refresh_table()
+        self.mass_names.delete("0.0", "end")
+        self.mass_phones.delete("0.0", "end")
+
+        if errors:
+            messagebox.showwarning(
+                "Concluido com avisos",
+                f"{added} contato(s) adicionado(s).\n\n"
+                f"{len(errors)} ignorado(s):\n" + "\n".join(errors)
+            )
+        else:
+            messagebox.showinfo("Sucesso", f"{added} contato(s) adicionado(s).")
+        self.log(f"{added} contatos adicionados em massa.")
 
     def add_contact(self):
         nome     = self.name_var.get().strip()
