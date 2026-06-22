@@ -904,12 +904,13 @@ class WhatsAppPanel(ctk.CTk):
 
     # ── Ações de contato ──────────────────────────────────────────────────────
 
-    def add_contacts_bulk(self):
+    def add_contacts_bulk(self, silent: bool = False):
         names  = [n.strip() for n in self.mass_names.get("0.0", "end").splitlines() if n.strip()]
         phones = [p.strip() for p in self.mass_phones.get("0.0", "end").splitlines() if p.strip()]
 
         if not names or not phones:
-            messagebox.showwarning("Aviso", "Cole os nomes e os telefones antes de adicionar.")
+            if not silent:
+                messagebox.showwarning("Aviso", "Cole os nomes e os telefones antes de adicionar.")
             return
         if len(names) != len(phones):
             messagebox.showwarning(
@@ -941,7 +942,7 @@ class WhatsAppPanel(ctk.CTk):
                 f"{added} contato(s) adicionado(s).\n\n"
                 f"{len(errors)} ignorado(s):\n" + "\n".join(errors)
             )
-        else:
+        elif not silent:
             messagebox.showinfo("Sucesso", f"{added} contato(s) adicionado(s).")
         self.log(f"{added} contatos adicionados em massa.")
 
@@ -1099,8 +1100,15 @@ class WhatsAppPanel(ctk.CTk):
     def start_send_loop(self):
         if self.running:
             return
+
+        # Se houver conteúdo nos campos de massa, importar automaticamente antes de iniciar
+        names  = [n.strip() for n in self.mass_names.get("0.0", "end").splitlines() if n.strip()]
+        phones = [p.strip() for p in self.mass_phones.get("0.0", "end").splitlines() if p.strip()]
+        if names or phones:
+            self.add_contacts_bulk(silent=True)
+
         if not self.contacts:
-            messagebox.showwarning("Aviso", "Carregue ou adicione contatos antes de iniciar.")
+            messagebox.showwarning("Aviso", "Adicione contatos antes de iniciar.")
             return
         blocos = [box.get("0.0", "end").strip()
                   for _, box in self.block_widgets
