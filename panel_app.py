@@ -146,6 +146,103 @@ class PreviewWindow(ctk.CTkToplevel):
 # Card de estatística
 # ─────────────────────────────────────────────────────────────────────────────
 
+class FinalDashboard(ctk.CTkToplevel):
+    """Janela de resultado exibida ao concluir o envio."""
+
+    def __init__(self, master, contacts: list[dict], export_fn):
+        super().__init__(master)
+        self.title("Resultado do Envio")
+        self.geometry("780x620")
+        self.minsize(640, 480)
+        self.configure(fg_color=C["bg"])
+        self.grab_set()
+
+        sent    = [c for c in contacts if c.get("status") == "Enviado"]
+        failed  = [c for c in contacts if c.get("status") == "Falha"]
+        total   = len(contacts)
+
+        # ── Header ────────────────────────────────────────────────────────────
+        hdr = ctk.CTkFrame(self, fg_color=C["success"] if not failed else C["warning"],
+                           corner_radius=0, height=70)
+        hdr.pack(fill="x")
+        hdr.pack_propagate(False)
+        icon  = "Envio concluido!" if not failed else "Envio concluido com falhas"
+        ctk.CTkLabel(hdr, text=icon, font=("Segoe UI", 18, "bold"),
+                     text_color="#ffffff").pack(side="left", padx=24, pady=18)
+
+        # ── Cards de resumo ───────────────────────────────────────────────────
+        cards = ctk.CTkFrame(self, fg_color="transparent")
+        cards.pack(fill="x", padx=24, pady=16)
+        for i in range(3):
+            cards.columnconfigure(i, weight=1)
+
+        def _mini_card(col, title, value, color):
+            f = ctk.CTkFrame(cards, fg_color=C["surface"], corner_radius=12)
+            f.grid(row=0, column=col, padx=6, sticky="ew")
+            ctk.CTkLabel(f, text=title, font=("Segoe UI", 11),
+                         text_color=C["subtext"]).pack(anchor="w", padx=14, pady=(12, 0))
+            ctk.CTkLabel(f, text=str(value), font=("Segoe UI", 26, "bold"),
+                         text_color=color).pack(anchor="w", padx=14, pady=(2, 12))
+
+        _mini_card(0, "Total enviados", len(sent),  C["success"])
+        _mini_card(1, "Falhas",         len(failed), C["danger"])
+        _mini_card(2, "Total",          total,       C["accent"])
+
+        # ── Tabela de resultados ──────────────────────────────────────────────
+        ctk.CTkLabel(self, text="Detalhe por contato",
+                     font=("Segoe UI", 13, "bold"), text_color=C["text"]).pack(
+            anchor="w", padx=24, pady=(0, 6))
+
+        table_frame = tk.Frame(self, bg=C["bg"])
+        table_frame.pack(fill="both", expand=True, padx=24, pady=(0, 12))
+        table_frame.columnconfigure(0, weight=1)
+        table_frame.rowconfigure(0, weight=1)
+
+        style = ttk.Style()
+        style.configure("D.Treeview",
+            background=C["surface"], foreground=C["text"],
+            fieldbackground=C["surface"], rowheight=34, font=("Segoe UI", 11))
+        style.configure("D.Treeview.Heading",
+            background="#0f172a", foreground=C["subtext"],
+            font=("Segoe UI", 11, "bold"), relief="flat")
+        style.map("D.Treeview", background=[("selected", C["accent"])])
+
+        tree = ttk.Treeview(table_frame,
+                            columns=("nome", "telefone", "status"),
+                            show="headings", style="D.Treeview")
+        tree.heading("nome",     text="  Nome")
+        tree.heading("telefone", text="  Telefone")
+        tree.heading("status",   text="Status")
+        tree.column("nome",     width=280, anchor="w")
+        tree.column("telefone", width=200, anchor="w")
+        tree.column("status",   width=140, anchor="center")
+        tree.tag_configure("enviado", foreground=C["success"])
+        tree.tag_configure("falha",   foreground=C["danger"])
+
+        vsb = ttk.Scrollbar(table_frame, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=vsb.set)
+        tree.grid(row=0, column=0, sticky="nsew")
+        vsb.grid(row=0, column=1, sticky="ns")
+
+        for c in contacts:
+            status = c.get("status", "—")
+            tree.insert("", "end",
+                        values=(c["nome"], c["telefone"], status),
+                        tags=(status.lower(),))
+
+        # ── Botões ────────────────────────────────────────────────────────────
+        btns = ctk.CTkFrame(self, fg_color="transparent")
+        btns.pack(fill="x", padx=24, pady=(0, 20))
+
+        ctk.CTkButton(btns, text="Exportar Relatorio", image=ic.export_icon(),
+                      compound="left", command=export_fn,
+                      height=40, corner_radius=8, font=("Segoe UI", 12),
+                      fg_color=C["accent"], hover_color="#2563eb").pack(side="left", padx=(0, 10))
+        ctk.CTkButton(btns, text="Fechar", command=self.destroy,
+                      height=40, corner_radius=8, font=("Segoe UI", 12),
+                      fg_color=C["border"], hover_color="#475569").pack(side="left")
+
+
 class StatCard(ctk.CTkFrame):
     def __init__(self, master, title: str, color: str, **kw):
         super().__init__(master, corner_radius=14, fg_color=C["surface"], **kw)
@@ -197,6 +294,11 @@ class WhatsAppPanel(ctk.CTk):
         self._start_time    = 0.0
         self._estimated_total = 0
         self._countdown_id: str | None = None
+
+        # Status ao vivo do envio
+        self.live_contact_var = tk.StringVar(value="—")
+        self.live_msg_var     = tk.StringVar(value="—")
+        self.live_next_var    = tk.StringVar(value="—")
 
         self.blocos = self._load_messages()
 
@@ -661,7 +763,7 @@ class WhatsAppPanel(ctk.CTk):
         right = ctk.CTkFrame(parent, fg_color="transparent")
         right.grid(row=0, column=1, sticky="nsew")
         right.columnconfigure(0, weight=1)
-        right.rowconfigure(4, weight=1)
+        right.rowconfigure(5, weight=1)
 
         # ── Configuração de tempo ─────────────────────────────────────────────
         delay_card = ctk.CTkFrame(right, fg_color=C["surface"], corner_radius=14)
@@ -742,9 +844,34 @@ class WhatsAppPanel(ctk.CTk):
         self.card_failed .grid(row=1, column=0, padx=(0, 6), pady=(6, 0), sticky="ew")
         self.card_pending.grid(row=1, column=1, padx=(6, 0), pady=(6, 0), sticky="ew")
 
+        # ── Status ao vivo ────────────────────────────────────────────────────
+        live = ctk.CTkFrame(right, fg_color=C["surface"], corner_radius=14)
+        live.grid(row=2, column=0, sticky="ew", pady=(0, 12))
+        live.columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(live, text="Enviando agora",
+                     font=("Segoe UI", 12, "bold"), text_color=C["subtext"]).grid(
+            row=0, column=0, sticky="w", padx=16, pady=(12, 4))
+
+        ctk.CTkLabel(live, textvariable=self.live_contact_var,
+                     font=("Segoe UI", 16, "bold"), text_color=C["accent"]).grid(
+            row=1, column=0, sticky="w", padx=16, pady=(0, 2))
+
+        ctk.CTkLabel(live, textvariable=self.live_msg_var,
+                     font=("Segoe UI", 11), text_color=C["text"],
+                     wraplength=280, justify="left").grid(
+            row=2, column=0, sticky="w", padx=16, pady=(0, 8))
+
+        ctk.CTkFrame(live, fg_color=C["border"], height=1).grid(
+            row=3, column=0, sticky="ew", padx=16, pady=(0, 8))
+
+        ctk.CTkLabel(live, textvariable=self.live_next_var,
+                     font=("Segoe UI", 11), text_color=C["subtext"]).grid(
+            row=4, column=0, sticky="w", padx=16, pady=(0, 12))
+
         # Progresso
         prog = ctk.CTkFrame(right, fg_color=C["surface"], corner_radius=14)
-        prog.grid(row=2, column=0, sticky="ew", pady=(12, 12))
+        prog.grid(row=3, column=0, sticky="ew", pady=(0, 12))
         prog.columnconfigure(0, weight=1)
 
         self.summary_var = tk.StringVar(value="0 / 0 concluidos")
@@ -759,7 +886,7 @@ class WhatsAppPanel(ctk.CTk):
 
         # Botões de controle
         ctrl = ctk.CTkFrame(right, fg_color=C["surface"], corner_radius=14)
-        ctrl.grid(row=3, column=0, sticky="ew", pady=(0, 12))
+        ctrl.grid(row=4, column=0, sticky="ew", pady=(0, 12))
         ctrl.columnconfigure(0, weight=1)
 
         ctk.CTkLabel(ctrl, text="Controle de Envio",
@@ -792,7 +919,7 @@ class WhatsAppPanel(ctk.CTk):
 
         # Log
         log_card = ctk.CTkFrame(right, fg_color=C["surface"], corner_radius=14)
-        log_card.grid(row=4, column=0, sticky="nsew")
+        log_card.grid(row=5, column=0, sticky="nsew")
         log_card.columnconfigure(0, weight=1)
         log_card.rowconfigure(1, weight=1)
 
@@ -1157,6 +1284,12 @@ class WhatsAppPanel(ctk.CTk):
         image_path = self.image_path
         total      = len(self.contacts)
 
+        if self.delay_mode.get() == "fixo":
+            d_min = d_max = float(self.delay_fixo_var.get())
+        else:
+            d_min = float(self.delay_min_var.get())
+            d_max = float(self.delay_max_var.get())
+
         for index, item in enumerate(self.contacts):
             if self.stop_requested:
                 break
@@ -1167,34 +1300,62 @@ class WhatsAppPanel(ctk.CTk):
 
             nome     = item["nome"]
             telefone = item["telefone"]
+
+            # Próximo contato na fila
+            if index + 1 < total:
+                proximo = self.contacts[index + 1]["nome"]
+                avg_pause = (float(self.pause_min_var.get()) + float(self.pause_max_var.get())) / 2
+                avg_block = (d_min + d_max) / 2
+                eta = int(len(blocos) * avg_block + avg_pause + 6)
+                self.after(0, lambda n=proximo, s=eta: self.live_next_var.set(
+                    f"Proximo: {n}  (~{self._format_time(s)})"))
+            else:
+                self.after(0, lambda: self.live_next_var.set("Ultimo contato da lista"))
+
+            self.after(0, lambda n=nome: self.live_contact_var.set(n))
+            self.after(0, lambda: self.live_msg_var.set("Abrindo conversa..."))
             self._update_item_status(index, "Enviando")
             self._log_safe(f"[{index + 1}/{total}] Enviando para {nome}...")
 
+            def _msg_callback(bloco_idx, bloco_total, texto, n=nome):
+                preview = texto[:60] + ("..." if len(texto) > 60 else "")
+                self.after(0, lambda: self.live_msg_var.set(
+                    f"Mensagem {bloco_idx}/{bloco_total}:\n\"{preview}\""))
+                self._log_safe(f"  Mensagem {bloco_idx}/{bloco_total}: {preview}")
+
             try:
-                d_min = d_max = float(self.delay_fixo_var.get()) if self.delay_mode.get() == "fixo" \
-                    else (float(self.delay_min_var.get()), float(self.delay_max_var.get()))[0]
-                d_max = d_min if self.delay_mode.get() == "fixo" else float(self.delay_max_var.get())
                 enviar_para(nome, telefone, blocos, image_path,
-                            delay_min=d_min, delay_max=d_max)
+                            delay_min=d_min, delay_max=d_max,
+                            progress_callback=_msg_callback)
                 self._update_item_status(index, "Enviado")
                 self._log_safe(f"[{index + 1}/{total}] Concluido: {nome}")
             except InvalidWhatsAppNumberError:
                 self._update_item_status(index, "Falha")
-                self._log_safe(f"[{index + 1}/{total}] Sem WhatsApp: {nome} ({telefone}) — pulando.")
+                self._log_safe(f"[{index + 1}/{total}] Sem WhatsApp: {nome} — pulando.")
             except Exception as exc:
                 self._update_item_status(index, "Falha")
                 self._log_safe(f"[{index + 1}/{total}] Erro com {nome}: {exc}")
 
-            # Pausa entre contatos (exceto após o último)
+            # Pausa entre contatos com countdown no status ao vivo
             if index < total - 1 and not self.stop_requested:
                 pausa = self._get_pause_delay()
                 self._log_safe(f"Aguardando {pausa:.0f}s antes do proximo contato...")
+                self.after(0, lambda: self.live_contact_var.set("Aguardando..."))
+                self.after(0, lambda s=int(pausa): self.live_msg_var.set(
+                    f"Proximo contato em {self._format_time(s)}"))
                 time.sleep(pausa)
 
         self.running = False
+        self.after(0, lambda: self.live_contact_var.set("—"))
+        self.after(0, lambda: self.live_msg_var.set("—"))
+        self.after(0, lambda: self.live_next_var.set("—"))
+        self.after(0, lambda: self.countdown_var.set(""))
         self._set_status("Concluido" if not self.stop_requested else "Parado pelo usuario")
         self._log_safe("Processo finalizado.")
-        self.after(0, lambda: messagebox.showinfo("Resumo final", self.last_report))
+        self.after(0, self._open_final_dashboard)
+
+    def _open_final_dashboard(self):
+        FinalDashboard(self, list(self.contacts), self.export_report)
 
     def _update_item_status(self, index: int, status: str):
         if index < len(self.contacts):

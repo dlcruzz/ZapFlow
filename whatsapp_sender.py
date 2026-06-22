@@ -287,7 +287,8 @@ def send_image(image_path: str) -> None:
 def enviar_para(nome: str, telefone: str, blocos: list | None = None,
                 image_path: str | None = None,
                 delay_min: float | None = None,
-                delay_max: float | None = None) -> int:
+                delay_max: float | None = None,
+                progress_callback=None) -> int:
 
     # 1. Abre o chat correto via link direto
     try:
@@ -330,9 +331,10 @@ def enviar_para(nome: str, telefone: str, blocos: list | None = None,
     d_max = delay_max if delay_max is not None else config.DELAY_MAX
 
     for index, bloco in enumerate(blocos):
-        # Garante foco antes de cada bloco
         _click_message_input()
         texto = bloco.format(nome=nome)
+        if progress_callback:
+            progress_callback(index + 1, len(blocos), texto)
         send_text(texto)
         if index < len(blocos) - 1:
             delay = random.uniform(d_min, d_max)
