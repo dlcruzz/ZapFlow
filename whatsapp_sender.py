@@ -6,6 +6,7 @@ mensagem a partir do arquivo de configuração e registra tudo no log.
 
 from __future__ import annotations
 
+import ctypes
 import csv
 import logging
 import os
@@ -20,6 +21,27 @@ import pyautogui
 import pygetwindow as gw
 
 import config
+
+# ── Estruturas Windows para envio de unicode via SendInput ────────────────────
+
+class _KEYBDINPUT(ctypes.Structure):
+    _fields_ = [
+        ("wVk",         ctypes.c_ushort),
+        ("wScan",       ctypes.c_ushort),
+        ("dwFlags",     ctypes.c_ulong),
+        ("time",        ctypes.c_ulong),
+        ("dwExtraInfo", ctypes.c_uint64),
+    ]
+
+class _INPUT_UNION(ctypes.Union):
+    _fields_ = [("ki", _KEYBDINPUT), ("_pad", ctypes.c_byte * 28)]
+
+class _INPUT(ctypes.Structure):
+    _fields_ = [("type", ctypes.c_ulong), ("u", _INPUT_UNION)]
+
+_KEYEVENTF_UNICODE = 0x0004
+_KEYEVENTF_KEYUP   = 0x0002
+_INPUT_KEYBOARD    = 1
 
 logger = logging.getLogger("whatsapp_sender")
 
@@ -246,15 +268,64 @@ def search_contact(name: str, phone: str) -> None:
     time.sleep(1.2)
 
 
+def _send_codepoint(code: int) -> None:
+    """Envia um codepoint unicode via Windows SendInput (suporta emojis)."""
+    if code > 0xFFFF:
+        # Caractere fora do BMP: decompõe em surrogate pair
+        code -= 0x10000
+        _send_raw_scan(0xD800 | (code >> 10))
+        _send_raw_scan(0xDC00 | (code & 0x3FF))
+    else:
+        _send_raw_scan(code)
+
+
+def _send_raw_scan(scan: int) -> None:
+    for flags in (_KEYEVENTF_UNICODE, _KEYEVENTF_UNICODE | _KEYEVENTF_KEYUP):
+        inp = _INPUT()
+        inp.type = _INPUT_KEYBOARD
+        inp.u.ki.wVk    = 0
+        inp.u.ki.wScan  = scan
+        inp.u.ki.dwFlags = flags
+        ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(_INPUT))
+
+
 def send_text(text: str) -> None:
-    # pyautogui.write() não suporta acentos nem emojis; usar clipboard resolve isso
-    try:
-        import pyperclip
-        pyperclip.copy(text)
-        pyautogui.hotkey("ctrl", "v")
-    except Exception:
-        pyautogui.write(text, interval=0.02)
-    time.sleep(0.3)
+    """
+    Digita o texto caractere por caractere simulando digitação humana.
+    Gera o indicador 'digitando...' no WhatsApp do destinatário e evita
+    detecção de automação.
+    """
+    # Pausa inicial — como se estivesse pensando antes de digitar
+    time.sleep(random.uniform(0.5, 1.4))
+
+    for char in text:
+        if char == "\n":
+            pyautogui.hotkey("shift", "enter")
+            time.sleep(random.uniform(0.2, 0.5))
+            continue
+
+        _send_codepoint(ord(char))
+
+        # Velocidade humana varia por tipo de caractere
+        if char in ".!?":
+            # Pausa após fim de frase (como se estivesse relendo)
+            delay = random.uniform(0.25, 0.70)
+        elif char in ",;:":
+            delay = random.uniform(0.12, 0.35)
+        elif char == " ":
+            delay = random.uniform(0.06, 0.18)
+        else:
+            # Velocidade de digitação normal: ~60-200 chars/min
+            delay = random.uniform(0.04, 0.17)
+
+        # Hesitação aleatória (~3% das teclas) — simula pausa de pensamento
+        if random.random() < 0.03:
+            delay += random.uniform(0.6, 1.8)
+
+        time.sleep(delay)
+
+    # Pausa antes de enviar — como se estivesse relendo a mensagem
+    time.sleep(random.uniform(0.8, 2.2))
     pyautogui.press("enter")
 
 
