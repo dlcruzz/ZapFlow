@@ -123,3 +123,52 @@ def msg(s=_S):
         d.rounded_rectangle([1, 1, s - 2, s - 5], radius=3, outline=c, width=2)
         d.polygon([(3, s - 5), (3, s - 1), (8, s - 5)], fill=c)
     return _mk(draw, s)
+
+
+def person(s=_S):
+    def draw(d, c):
+        m = s // 2
+        d.ellipse([m - 4, 1, m + 4, 9], outline=c, width=2)
+        d.arc([1, 8, s - 2, s + 2], start=0, end=180, fill=c, width=2)
+    return _mk(draw, s)
+
+
+def shield(s=_S):
+    def draw(d, c):
+        m = s // 2
+        pts = [(m, 1), (s - 2, 4), (s - 2, s // 2 + 2), (m, s - 1), (2, s // 2 + 2), (2, 4)]
+        d.polygon(pts, outline=c, width=2)
+        d.line([m - 3, s // 2, m, s // 2 + 3], fill=c, width=2)
+        d.line([m, s // 2 + 3, m + 4, s // 2 - 2], fill=c, width=2)
+    return _mk(draw, s)
+
+
+def clock(s=_S):
+    def draw(d, c):
+        m = s // 2
+        d.ellipse([2, 2, s - 3, s - 3], outline=c, width=2)
+        d.line([m, m, m, m - 4], fill=c, width=2)
+        d.line([m, m, m + 3, m + 2], fill=c, width=2)
+    return _mk(draw, s)
+
+
+def help_icon(s=_S):
+    def draw(d, c):
+        m = s // 2
+        d.ellipse([2, 2, s - 3, s - 3], outline=c, width=2)
+        d.text((m - 2, 4), "?", fill=c)
+    return _mk(draw, s)
+
+
+def check(s=_S):
+    def draw(d, c):
+        d.line([3, s // 2, s // 2 - 1, s - 4], fill=c, width=2)
+        d.line([s // 2 - 1, s - 4, s - 3, 3], fill=c, width=2)
+    return _mk(draw, s)
+
+
+def send_icon(s=_S):
+    def draw(d, c):
+        d.polygon([(1, 1), (1, s - 2), (s - 2, s // 2)], fill=c)
+        d.line([1, s // 2, s - 4, s // 2], fill=c, width=2)
+    return _mk(draw, s)
