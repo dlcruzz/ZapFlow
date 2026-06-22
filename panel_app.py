@@ -16,7 +16,7 @@ import config
 import icons as ic
 from anti_ban import DailyStats, parse_spin
 from instagram_sender import (InstagramDMError, InstagramLoginError,
-                               InstagramUserNotFound, chrome_profile_padrao,
+                               InstagramUserNotFound, chrome_profile_zapflow,
                                criar_driver, enviar_instagram, verificar_login)
 from theme import T, F, STATUS
 from whatsapp_sender import (InvalidWhatsAppNumberError, enviar_para,
@@ -476,7 +476,7 @@ class WhatsAppPanel(ctk.CTk):
         self._ig_driver = None
         self.ig_running  = False
         self.ig_stop     = False
-        self.ig_chrome_var  = tk.StringVar(value=chrome_profile_padrao())
+        self.ig_chrome_var  = tk.StringVar(value=chrome_profile_zapflow())
         self.ig_profile_var = tk.StringVar(value="Default")
         self.ig_status_var  = tk.StringVar(value="Pronto")
 
@@ -1311,38 +1311,25 @@ class WhatsAppPanel(ctk.CTk):
         chrome_card = _card(parent)
         chrome_card.pack(fill="x", padx=32, pady=(0, 12))
 
-        ctk.CTkLabel(chrome_card, text="Perfil do Chrome",
+        ctk.CTkLabel(chrome_card, text="Configuração — Primeiro Acesso",
                      font=F["subhead"], text_color=T["text_1"]).pack(
-            anchor="w", padx=16, pady=(14, 4))
-        ctk.CTkLabel(chrome_card,
-                     text="O Chrome abrirá usando seu perfil para aproveitar o login já existente no Instagram.",
-                     font=F["body_sm"], text_color=T["text_3"]).pack(
-            anchor="w", padx=16, pady=(0, 10))
+            anchor="w", padx=16, pady=(14, 6))
 
-        path_row = ctk.CTkFrame(chrome_card, fg_color="transparent")
-        path_row.pack(fill="x", padx=16, pady=(0, 8))
-        path_row.columnconfigure(0, weight=1)
+        # Aviso explicativo
+        aviso = ctk.CTkFrame(chrome_card, fg_color=T["accent_dim"], corner_radius=8)
+        aviso.pack(fill="x", padx=16, pady=(0, 12))
+        ctk.CTkLabel(aviso,
+                     text="O ZapFlow usa um perfil Chrome exclusivo para não conflitar com seu Chrome normal.\n"
+                          "Na primeira vez, clique em 'Fazer Login' abaixo, faça login no Instagram\n"
+                          "e feche o Chrome. Nas próximas vezes o login já fica salvo.",
+                     font=F["body_sm"], text_color=T["text_1"],
+                     justify="left").pack(anchor="w", padx=12, pady=10)
 
-        ctk.CTkEntry(path_row, textvariable=self.ig_chrome_var,
-                     height=36, corner_radius=T["r_btn"], font=F["body_sm"],
-                     fg_color=T["bg_elevated"], border_color=T["border"]).grid(
-            row=0, column=0, sticky="ew", padx=(0, 8))
-        ctk.CTkButton(path_row, text="Detectar", command=self._ig_detect_chrome,
-                      width=90, height=36, corner_radius=T["r_btn"], font=F["body"],
-                      fg_color=T["bg_elevated"], hover_color=T["bg_hover"]).grid(
-            row=0, column=1)
-
-        profile_row = ctk.CTkFrame(chrome_card, fg_color="transparent")
-        profile_row.pack(anchor="w", padx=16, pady=(0, 14))
-        ctk.CTkLabel(profile_row, text="Diretório do perfil:",
-                     font=F["label"], text_color=T["text_3"]).pack(side="left", padx=(0, 8))
-        ctk.CTkEntry(profile_row, textvariable=self.ig_profile_var,
-                     width=120, height=32, corner_radius=T["r_btn"], font=F["mono"],
-                     fg_color=T["bg_elevated"], border_color=T["border"],
-                     placeholder_text="Default").pack(side="left")
-        ctk.CTkLabel(profile_row,
-                     text="  (geralmente 'Default' ou 'Profile 1')",
-                     font=F["label_sm"], text_color=T["text_3"]).pack(side="left")
+        ctk.CTkButton(chrome_card, text="Fazer Login no Instagram (1ª vez)",
+                      command=self._ig_open_login,
+                      height=38, corner_radius=T["r_btn"], font=F["body"],
+                      fg_color=T["accent"], hover_color=T["accent_hover"]).pack(
+            anchor="w", padx=16, pady=(0, 14))
 
         # ── Usuários ──────────────────────────────────────────────────────────
         users_card = _card(parent)
@@ -1433,8 +1420,27 @@ class WhatsAppPanel(ctk.CTk):
         self.ig_log_box.grid(row=1, column=0, sticky="nsew", padx=12, pady=(8, 12))
 
     def _ig_detect_chrome(self):
-        path = chrome_profile_padrao()
-        self.ig_chrome_var.set(path)
+        self.ig_chrome_var.set(chrome_profile_zapflow())
+
+    def _ig_open_login(self):
+        """Abre o Chrome com o perfil exclusivo do ZapFlow para o usuário fazer login."""
+        def _abrir():
+            try:
+                driver = criar_driver(chrome_profile_zapflow())
+                driver.get("https://www.instagram.com/accounts/login/")
+                self._ig_log_safe("Chrome aberto. Faça login no Instagram e feche o Chrome.")
+                messagebox.showinfo(
+                    "Fazer Login",
+                    "O Chrome foi aberto na página de login do Instagram.\n\n"
+                    "1. Faça login normalmente\n"
+                    "2. Feche o Chrome após o login\n\n"
+                    "Nas próximas vezes o ZapFlow já estará logado automaticamente."
+                )
+            except Exception as e:
+                self._ig_log_safe(f"Erro ao abrir Chrome para login: {e}")
+                messagebox.showerror("Erro", str(e))
+
+        threading.Thread(target=_abrir, daemon=True).start()
 
     def _ig_add_msg(self, text: str = ""):
         idx = len(self.ig_msg_widgets) + 1

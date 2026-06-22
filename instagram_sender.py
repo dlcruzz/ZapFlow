@@ -20,6 +20,19 @@ logger = logging.getLogger("instagram_sender")
 _WAIT = 12
 
 
+def chrome_profile_zapflow() -> str:
+    """
+    Diretório de perfil Chrome exclusivo do ZapFlow.
+    Fica ao lado do executável/script e NUNCA conflita com o Chrome normal do usuário.
+    Na primeira vez, o usuário precisa fazer login no Instagram dentro desse Chrome.
+    """
+    import sys
+    base = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).parent
+    profile = base / "zf_chrome_ig"
+    profile.mkdir(parents=True, exist_ok=True)
+    return str(profile)
+
+
 class InstagramLoginError(RuntimeError):
     """Usuário não está logado no Instagram."""
 
@@ -58,13 +71,17 @@ def chrome_profile_padrao() -> str:
 
 def criar_driver(chrome_user_data: str | None = None,
                  profile_dir: str = "Default") -> webdriver.Chrome:
-    """Cria driver Chrome usando o perfil do usuário para manter login do Instagram."""
+    """
+    Cria driver Chrome usando perfil exclusivo do ZapFlow.
+    Isso evita o erro 'session not created' causado pelo Chrome já estar aberto
+    com o mesmo perfil do usuário.
+    """
     opts = webdriver.ChromeOptions()
 
-    data_dir = chrome_user_data or chrome_profile_padrao()
-    if Path(data_dir).exists():
-        opts.add_argument(f"--user-data-dir={data_dir}")
-        opts.add_argument(f"--profile-directory={profile_dir}")
+    # Usa o perfil exclusivo do ZapFlow (nunca conflita com Chrome aberto)
+    data_dir = chrome_user_data if chrome_user_data else chrome_profile_zapflow()
+    opts.add_argument(f"--user-data-dir={data_dir}")
+    opts.add_argument(f"--profile-directory={profile_dir}")
 
     opts.add_argument("--disable-blink-features=AutomationControlled")
     opts.add_argument("--disable-notifications")
