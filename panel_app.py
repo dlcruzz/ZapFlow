@@ -117,7 +117,7 @@ class Badge(ctk.CTkLabel):
         color = STATUS.get(text, T["text_3"])
         super().__init__(master, text=text, font=F["label_sm"],
                          text_color=color,
-                         fg_color=color + "22",
+                         fg_color=T["bg_elevated"],
                          corner_radius=T["r_pill"],
                          padx=8, pady=2, **kw)
 
@@ -802,7 +802,7 @@ class WhatsAppPanel(ctk.CTk):
 
         ctk.CTkButton(frame, text="", image=ic.close(13), command=_rm,
                       width=30, height=30, corner_radius=T["r_btn"],
-                      fg_color=T["danger"] + "33",
+                      fg_color="#3D1010",
                       hover_color=T["danger"]).grid(
             row=0, column=2, padx=(0, 12), pady=14, sticky="n")
 
