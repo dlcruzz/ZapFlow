@@ -63,6 +63,42 @@ def _click(w, x_pct: float, y_pct: float, wait: float = 1.0) -> None:
         time.sleep(wait)
 
 
+# ─── Reset de estado ──────────────────────────────────────────────────────────
+
+def _fechar_modais() -> None:
+    """Pressiona Escape 3x para fechar qualquer modal/popup/DM aberto."""
+    _force_focus_ig()
+    for _ in range(3):
+        pyautogui.press("escape")
+        time.sleep(0.4)
+
+
+def _ir_para_home() -> None:
+    """
+    Clica no ícone Home (2º ícone da sidebar) para garantir estado
+    conhecido antes de cada novo contato.
+    Home: x ≈ 3.4%, y ≈ 18%
+    """
+    w = _get_win()
+    if not w:
+        return
+    _force_focus_ig()
+    pyautogui.click(w.left + int(w.width * 0.034),
+                    w.top  + int(w.height * 0.18))
+    time.sleep(random.uniform(1.5, 2.5))
+
+
+def _reset_estado() -> None:
+    """
+    Reseta o Instagram para o feed (estado inicial limpo) antes de
+    cada novo contato. Garante que modais e notificações não interfiram.
+    """
+    _fechar_modais()
+    time.sleep(0.5)
+    _ir_para_home()
+    logger.info("Estado resetado para home")
+
+
 # ─── Abrir app ────────────────────────────────────────────────────────────────
 
 def abrir_app_instagram() -> None:
@@ -241,11 +277,12 @@ def enviar_instagram(
     if not w:
         raise InstagramDMError("App do Instagram nao esta aberto.")
 
-    # Pausa inicial — simula abertura natural do app
-    time.sleep(random.uniform(1.5, 3.0))
+    # Reseta para estado limpo (fecha modais, volta ao feed)
+    _reset_estado()
+    time.sleep(random.uniform(1.0, 2.0))
 
-    # Passo 1 — Lupa (pausa antes como se fosse navegar normalmente)
-    time.sleep(random.uniform(0.8, 1.5))
+    # Passo 1 — Lupa
+    time.sleep(random.uniform(0.5, 1.0))
     _clicar_lupa()
 
     # Passo 2 — Pesquisar (pequena pausa antes de digitar)
