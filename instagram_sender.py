@@ -234,11 +234,11 @@ def _clicar_enviar_mensagem() -> None:
 def _clicar_input_modal() -> None:
     """
     O modal de DM aparece no canto direito.
-    Input 'Mensagem...': x ≈ 79%, y ≈ 93% (bem no fundo do modal).
+    Input 'Mensagem...': x ≈ 79%, y ≈ 90.5% — centro do 'M'.
     """
     w = _get_win()
     logger.info("Clicando no input do modal DM")
-    _click(w, 0.79, 0.93, wait=0.5)
+    _click(w, 0.79, 0.905, wait=0.5)
 
 
 # ─── Digitação humana via Windows SendInput ───────────────────────────────────
