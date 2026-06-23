@@ -1365,8 +1365,9 @@ class WhatsAppPanel(ctk.CTk):
                       height=34, corner_radius=T["r_btn"], font=F["body"],
                       fg_color=T["bg_elevated"], hover_color=T["bg_hover"]).pack(side="left")
 
-        # Bloco inicial
-        self._ig_add_msg("Olá {nome}, tudo bem?")
+        # Carrega as mesmas mensagens padrão do WhatsApp
+        for bloco in self._load_messages():
+            self._ig_add_msg(bloco)
 
         # ── Controles ─────────────────────────────────────────────────────────
         ctrl = ctk.CTkFrame(parent, fg_color="transparent")
