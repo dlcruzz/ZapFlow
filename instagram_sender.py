@@ -70,6 +70,24 @@ def chrome_profile_padrao() -> str:
     return str(Path.home() / "AppData" / "Local" / "Google" / "Chrome" / "User Data")
 
 
+_DEBUG_PORT = 9222
+
+
+def _find_chrome_exe() -> str:
+    """Localiza o executável do Chrome no Windows."""
+    candidates = [
+        Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
+        Path(r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"),
+        Path.home() / "AppData" / "Local" / "Google" / "Chrome" / "Application" / "chrome.exe",
+    ]
+    for c in candidates:
+        if c.exists():
+            return str(c)
+    raise FileNotFoundError(
+        "Google Chrome não encontrado.\nInstale o Chrome e tente novamente."
+    )
+
+
 def fechar_chrome() -> None:
     """Fecha todos os processos do Chrome via taskkill."""
     import subprocess
@@ -79,68 +97,62 @@ def fechar_chrome() -> None:
 
 
 def _limpar_locks(data_dir: str, profile_dir: str = "Default") -> None:
-    """
-    Remove arquivos de lock que o Chrome deixa ao ser fechado abruptamente.
-    Sem isso, Chrome trava ao tentar abrir com o mesmo perfil.
-    """
-    locks = [
+    """Remove lock files que impedem Chrome de abrir com o mesmo perfil."""
+    for lock in [
         Path(data_dir) / "SingletonLock",
         Path(data_dir) / "SingletonCookie",
         Path(data_dir) / "SingletonSocket",
         Path(data_dir) / profile_dir / "lockfile",
-    ]
-    for lock in locks:
+    ]:
         try:
             if lock.exists():
                 lock.unlink()
-                logger.info("Lock removido: %s", lock)
-        except Exception as e:
-            logger.warning("Nao foi possivel remover lock %s: %s", lock, e)
+        except Exception:
+            pass
 
 
 def criar_driver(chrome_user_data: str | None = None,
                  profile_dir: str = "Default") -> webdriver.Chrome:
     """
-    Cria driver Chrome usando o perfil do usuário (com login do Instagram salvo).
-    Fecha o Chrome, limpa locks e abre uma instância limpa.
+    Abre o Chrome via subprocess com porta de debug fixa e conecta via
+    debuggerAddress. Isso evita todos os erros de 'session not created'
+    porque o Selenium se CONECTA ao Chrome já aberto em vez de criá-lo.
     """
+    import subprocess
+
     data_dir = chrome_user_data or chrome_profile_padrao()
+    chrome   = _find_chrome_exe()
 
-    # 1. Fechar Chrome existente
+    # 1. Fechar Chrome existente e limpar locks
     fechar_chrome()
-
-    # 2. Limpar lock files para Chrome não travar ao iniciar
     if Path(data_dir).exists():
         _limpar_locks(data_dir, profile_dir)
-
     time.sleep(1.0)
 
+    # 2. Abrir Chrome com porta de debug conhecida
+    cmd = [
+        chrome,
+        f"--remote-debugging-port={_DEBUG_PORT}",
+        f"--user-data-dir={data_dir}",
+        f"--profile-directory={profile_dir}",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--disable-notifications",
+        "--disable-blink-features=AutomationControlled",
+        "--start-maximized",
+    ]
+    subprocess.Popen(cmd)
+    logger.info("Chrome iniciado com porta de debug %s", _DEBUG_PORT)
+    time.sleep(4.0)  # aguarda Chrome carregar completamente
+
+    # 3. Conectar ao Chrome já aberto via debuggerAddress
     opts = webdriver.ChromeOptions()
-
-    # Perfil com login salvo
-    if Path(data_dir).exists():
-        opts.add_argument(f"--user-data-dir={data_dir}")
-        opts.add_argument(f"--profile-directory={profile_dir}")
-
-    # Opções essenciais para estabilidade
-    opts.add_argument("--no-sandbox")
-    opts.add_argument("--disable-dev-shm-usage")
-    opts.add_argument("--disable-gpu")
-    opts.add_argument("--no-first-run")
-    opts.add_argument("--no-default-browser-check")
-    opts.add_argument("--disable-notifications")
-    opts.add_argument("--remote-debugging-port=0")   # evita DevToolsActivePort error
-
-    # Anti-detecção
-    opts.add_argument("--disable-blink-features=AutomationControlled")
-    opts.add_experimental_option("excludeSwitches", ["enable-automation"])
-    opts.add_experimental_option("useAutomationExtension", False)
+    opts.add_experimental_option("debuggerAddress", f"127.0.0.1:{_DEBUG_PORT}")
 
     driver = webdriver.Chrome(options=opts)
     driver.execute_script(
         "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
     )
-    driver.maximize_window()
     return driver
 
 
