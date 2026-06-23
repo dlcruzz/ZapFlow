@@ -71,33 +71,68 @@ def chrome_profile_padrao() -> str:
 
 
 def fechar_chrome() -> None:
-    """Fecha todos os processos do Chrome para liberar o perfil."""
+    """Fecha todos os processos do Chrome via taskkill."""
     import subprocess
     subprocess.run(["taskkill", "/F", "/IM", "chrome.exe"],
                    capture_output=True, timeout=10)
-    time.sleep(2.5)
+    time.sleep(3.0)
+
+
+def _limpar_locks(data_dir: str, profile_dir: str = "Default") -> None:
+    """
+    Remove arquivos de lock que o Chrome deixa ao ser fechado abruptamente.
+    Sem isso, Chrome trava ao tentar abrir com o mesmo perfil.
+    """
+    locks = [
+        Path(data_dir) / "SingletonLock",
+        Path(data_dir) / "SingletonCookie",
+        Path(data_dir) / "SingletonSocket",
+        Path(data_dir) / profile_dir / "lockfile",
+    ]
+    for lock in locks:
+        try:
+            if lock.exists():
+                lock.unlink()
+                logger.info("Lock removido: %s", lock)
+        except Exception as e:
+            logger.warning("Nao foi possivel remover lock %s: %s", lock, e)
 
 
 def criar_driver(chrome_user_data: str | None = None,
                  profile_dir: str = "Default") -> webdriver.Chrome:
     """
-    Cria driver Chrome usando o perfil do usuário.
-    Fecha o Chrome antes de abrir para evitar conflito de perfil.
+    Cria driver Chrome usando o perfil do usuário (com login do Instagram salvo).
+    Fecha o Chrome, limpa locks e abre uma instância limpa.
     """
-    # Garante que não há Chrome rodando com o mesmo perfil
+    data_dir = chrome_user_data or chrome_profile_padrao()
+
+    # 1. Fechar Chrome existente
     fechar_chrome()
+
+    # 2. Limpar lock files para Chrome não travar ao iniciar
+    if Path(data_dir).exists():
+        _limpar_locks(data_dir, profile_dir)
+
+    time.sleep(1.0)
 
     opts = webdriver.ChromeOptions()
 
-    data_dir = chrome_user_data or chrome_profile_padrao()
+    # Perfil com login salvo
     if Path(data_dir).exists():
         opts.add_argument(f"--user-data-dir={data_dir}")
         opts.add_argument(f"--profile-directory={profile_dir}")
 
-    opts.add_argument("--disable-blink-features=AutomationControlled")
-    opts.add_argument("--disable-notifications")
+    # Opções essenciais para estabilidade
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
+    opts.add_argument("--disable-gpu")
+    opts.add_argument("--no-first-run")
+    opts.add_argument("--no-default-browser-check")
+    opts.add_argument("--disable-notifications")
+    opts.add_argument("--remote-debugging-port=0")   # evita DevToolsActivePort error
+
+    # Anti-detecção
+    opts.add_argument("--disable-blink-features=AutomationControlled")
     opts.add_experimental_option("excludeSwitches", ["enable-automation"])
     opts.add_experimental_option("useAutomationExtension", False)
 
