@@ -70,9 +70,23 @@ def chrome_profile_padrao() -> str:
     return str(Path.home() / "AppData" / "Local" / "Google" / "Chrome" / "User Data")
 
 
+def fechar_chrome() -> None:
+    """Fecha todos os processos do Chrome para liberar o perfil."""
+    import subprocess
+    subprocess.run(["taskkill", "/F", "/IM", "chrome.exe"],
+                   capture_output=True, timeout=10)
+    time.sleep(2.5)
+
+
 def criar_driver(chrome_user_data: str | None = None,
                  profile_dir: str = "Default") -> webdriver.Chrome:
-    """Cria driver Chrome usando o perfil do usuário para manter login do Instagram."""
+    """
+    Cria driver Chrome usando o perfil do usuário.
+    Fecha o Chrome antes de abrir para evitar conflito de perfil.
+    """
+    # Garante que não há Chrome rodando com o mesmo perfil
+    fechar_chrome()
+
     opts = webdriver.ChromeOptions()
 
     data_dir = chrome_user_data or chrome_profile_padrao()

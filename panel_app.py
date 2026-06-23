@@ -1504,6 +1504,17 @@ class WhatsAppPanel(ctk.CTk):
             messagebox.showwarning("Aviso", "Adicione pelo menos uma mensagem.")
             return
 
+        # Aviso: o Chrome será fechado para liberar o perfil
+        ok = messagebox.askokcancel(
+            "Atenção — Chrome será fechado",
+            "Para acessar o Instagram com seu perfil, o ZapFlow precisa fechar "
+            "todas as janelas do Chrome abertas agora.\n\n"
+            "Salve qualquer aba importante antes de continuar.\n\n"
+            "Clique OK para fechar o Chrome e iniciar o envio."
+        )
+        if not ok:
+            return
+
         self.ig_running = True
         self.ig_stop    = False
         self.ig_status_var.set("Iniciando Chrome...")
