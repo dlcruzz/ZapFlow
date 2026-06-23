@@ -164,14 +164,44 @@ def _clicar_primeiro_resultado() -> None:
 
 # ─── Passo 4: Clicar em "Enviar mensagem" ────────────────────────────────────
 
+def _modal_dm_aberto(w) -> bool:
+    """
+    Verifica se o modal de DM abriu olhando o canto superior direito
+    onde aparece o botão X de fechar o modal.
+    Quando o modal está aberto há pixels claros nessa região.
+    """
+    try:
+        rx = w.left + int(w.width  * 0.91)
+        ry = w.top  + int(w.height * 0.16)
+        shot   = pyautogui.screenshot(region=(rx, ry, 70, 45))
+        pixels = list(shot.getdata())
+        light  = sum(1 for r, g, b in pixels if r > 140 and g > 140 and b > 140)
+        return (light / len(pixels)) > 0.08
+    except Exception:
+        return False
+
+
 def _clicar_enviar_mensagem() -> None:
     """
-    Clica no botão 'Enviar mensagem' na página do perfil.
-    Botão: x ≈ 57%, y ≈ 55%.
+    Encontra o botão 'Enviar mensagem' testando múltiplas posições Y.
+    A posição varia conforme o tamanho da bio do perfil.
+    Verifica via screenshot se o modal DM abriu após cada tentativa.
     """
     w = _get_win()
-    logger.info("Clicando em 'Enviar mensagem'")
-    _click(w, 0.57, 0.55, wait=2.0)   # aguarda modal do DM abrir
+
+    # Posições Y candidatas (do mais provável ao menos provável)
+    for y_pct in [0.52, 0.50, 0.54, 0.48, 0.56, 0.46, 0.58, 0.44, 0.60]:
+        logger.info("Tentando 'Enviar mensagem' em y=%.2f", y_pct)
+        _click(w, 0.57, y_pct, wait=2.0)
+
+        if _modal_dm_aberto(w):
+            logger.info("Modal DM abriu — clique correto em y=%.2f", y_pct)
+            return
+
+    raise InstagramDMError(
+        "Botao 'Enviar mensagem' nao encontrado no perfil.\n"
+        "Verifique se voce e o usuario se seguem mutuamente."
+    )   # aguarda modal do DM abrir
 
 
 # ─── Passo 5: Clicar no input do modal e escrever ────────────────────────────
