@@ -263,17 +263,15 @@ def enviar_instagram(
     time.sleep(random.uniform(1.5, 3.0))
     _clicar_enviar_mensagem()
 
-    # Passo 5 — Aguarda modal abrir completamente
+    # Após clicar em "Enviar mensagem" o input já está focado — sem clique extra
     time.sleep(random.uniform(1.5, 2.5))
-    _clicar_input_modal()
-    time.sleep(random.uniform(0.5, 1.0))
 
     for idx, msg in enumerate(messages, start=1):
         if progress_callback:
             progress_callback(idx, len(messages), msg)
 
+        # Garante foco no Instagram antes de digitar
         _force_focus_ig()
-        _clicar_input_modal()
 
         # Pausa antes de digitar (simula leitura/pensamento)
         time.sleep(random.uniform(0.8, 2.0))
