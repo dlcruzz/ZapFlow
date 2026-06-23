@@ -167,11 +167,11 @@ def _clicar_primeiro_resultado() -> None:
 def _clicar_enviar_mensagem() -> None:
     """
     Clica no botão 'Enviar mensagem' na página do perfil.
-    Botão: x ≈ 57%, y ≈ 60%.
+    Botão: x ≈ 57%, y ≈ 55%.
     """
     w = _get_win()
     logger.info("Clicando em 'Enviar mensagem'")
-    _click(w, 0.57, 0.60, wait=2.0)   # aguarda modal do DM abrir
+    _click(w, 0.57, 0.55, wait=2.0)   # aguarda modal do DM abrir
 
 
 # ─── Passo 5: Clicar no input do modal e escrever ────────────────────────────
