@@ -1473,20 +1473,13 @@ class WhatsAppPanel(ctk.CTk):
             messagebox.showwarning("Aviso", "Adicione pelo menos uma mensagem.")
             return
 
-        # Aviso: o Chrome será fechado para liberar o perfil
-        ok = messagebox.askokcancel(
-            "Atenção — Chrome será fechado",
-            "Para acessar o Instagram com seu perfil, o ZapFlow precisa fechar "
-            "todas as janelas do Chrome abertas agora.\n\n"
-            "Salve qualquer aba importante antes de continuar.\n\n"
-            "Clique OK para fechar o Chrome e iniciar o envio."
-        )
-        if not ok:
-            return
-
         self.ig_running = True
         self.ig_stop    = False
-        self.ig_status_var.set("Iniciando Chrome...")
+        self.ig_status_var.set("Iniciando...")
+
+        # Minimiza o ZapFlow para que não roube o foco durante a digitação
+        self.iconify()
+
         threading.Thread(
             target=self._ig_send_all,
             args=(usernames, messages),
@@ -1538,6 +1531,8 @@ class WhatsAppPanel(ctk.CTk):
         status = "Concluido" if not self.ig_stop else "Parado"
         self.after(0, lambda: self.ig_status_var.set(status))
         self._ig_log_safe(f"Processo finalizado — {status}.")
+        # Restaura a janela do ZapFlow
+        self.after(0, self.deiconify)
 
     # ──────────────────────────────────────────────────────────────────────────
     # Onboarding

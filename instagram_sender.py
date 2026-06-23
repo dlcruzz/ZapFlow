@@ -194,8 +194,14 @@ def _raw(scan: int) -> None:
 
 
 def _digitar(texto: str) -> None:
-    """Digita o texto letra por letra (comportamento humano)."""
+    """
+    Digita o texto letra por letra.
+    Força o foco no Instagram antes de começar e durante pausas longas.
+    """
+    # Garante que o Instagram tem foco antes de digitar
+    _force_focus_ig()
     time.sleep(random.uniform(0.5, 1.0))
+
     for char in texto:
         if char == "\n":
             pyautogui.hotkey("shift", "enter")
@@ -210,6 +216,8 @@ def _digitar(texto: str) -> None:
             time.sleep(random.uniform(0.04, 0.13))
         if random.random() < 0.03:
             time.sleep(random.uniform(0.4, 1.0))
+            # Após pausa longa, verifica se Instagram ainda tem foco
+            _force_focus_ig()
     time.sleep(random.uniform(0.6, 1.5))
     pyautogui.press("enter")
 
