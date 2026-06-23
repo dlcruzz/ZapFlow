@@ -1516,7 +1516,7 @@ class WhatsAppPanel(ctk.CTk):
                 self._ig_log_safe(f"[{idx + 1}/{total}] Concluido: @{username}")
 
                 if idx < total - 1 and not self.ig_stop:
-                    pausa = random.uniform(8, 20)
+                    pausa = random.uniform(15, 35)
                     self._ig_log_safe(f"Aguardando {pausa:.0f}s antes do proximo...")
                     time.sleep(pausa)
 

@@ -146,11 +146,11 @@ def _clicar_enviar_mensagem() -> None:
 def _clicar_input_modal() -> None:
     """
     O modal de DM aparece no canto direito.
-    Input de mensagem: x ≈ 79%, y ≈ 87%.
+    Input 'Mensagem...': x ≈ 79%, y ≈ 93% (bem no fundo do modal).
     """
     w = _get_win()
     logger.info("Clicando no input do modal DM")
-    _click(w, 0.79, 0.875, wait=0.5)
+    _click(w, 0.79, 0.93, wait=0.5)
 
 
 # ─── Digitação humana via Windows SendInput ───────────────────────────────────
@@ -230,7 +230,7 @@ def enviar_instagram(
     progress_callback=None,
 ) -> int:
     """
-    Fluxo completo:
+    Fluxo completo com delays anti-bloqueio:
     1. Clica na lupa da sidebar
     2. Pesquisa o username
     3. Clica no primeiro resultado
@@ -242,22 +242,31 @@ def enviar_instagram(
 
     w = _get_win()
     if not w:
-        raise InstagramDMError("App do Instagram não está aberto.")
+        raise InstagramDMError("App do Instagram nao esta aberto.")
 
-    # Passo 1 — Lupa
+    # Pausa inicial — simula abertura natural do app
+    time.sleep(random.uniform(1.5, 3.0))
+
+    # Passo 1 — Lupa (pausa antes como se fosse navegar normalmente)
+    time.sleep(random.uniform(0.8, 1.5))
     _clicar_lupa()
 
-    # Passo 2 — Pesquisar
+    # Passo 2 — Pesquisar (pequena pausa antes de digitar)
+    time.sleep(random.uniform(0.5, 1.2))
     _pesquisar_usuario(username)
 
-    # Passo 3 — Primeiro resultado
+    # Passo 3 — Primeiro resultado (pausa como se estivesse lendo os resultados)
+    time.sleep(random.uniform(1.0, 2.0))
     _clicar_primeiro_resultado()
 
-    # Passo 4 — Enviar mensagem
+    # Passo 4 — Enviar mensagem (pausa como se estivesse lendo o perfil)
+    time.sleep(random.uniform(1.5, 3.0))
     _clicar_enviar_mensagem()
 
-    # Passo 5 — Digitar no modal
+    # Passo 5 — Aguarda modal abrir completamente
+    time.sleep(random.uniform(1.5, 2.5))
     _clicar_input_modal()
+    time.sleep(random.uniform(0.5, 1.0))
 
     for idx, msg in enumerate(messages, start=1):
         if progress_callback:
@@ -265,10 +274,16 @@ def enviar_instagram(
 
         _force_focus_ig()
         _clicar_input_modal()
+
+        # Pausa antes de digitar (simula leitura/pensamento)
+        time.sleep(random.uniform(0.8, 2.0))
         _digitar(msg)
 
+        # Delay anti-bloqueio entre mensagens do mesmo contato
         if idx < len(messages):
-            time.sleep(random.uniform(2.0, 4.0))
+            pausa = random.uniform(4.0, 10.0)
+            logger.info("Pausa entre mensagens: %.1fs", pausa)
+            time.sleep(pausa)
 
     logger.info("Envio concluido para @%s", username)
     return len(messages)
