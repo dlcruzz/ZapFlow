@@ -20,19 +20,6 @@ logger = logging.getLogger("instagram_sender")
 _WAIT = 12
 
 
-def chrome_profile_zapflow() -> str:
-    """
-    Diretório de perfil Chrome exclusivo do ZapFlow.
-    Fica ao lado do executável/script e NUNCA conflita com o Chrome normal do usuário.
-    Na primeira vez, o usuário precisa fazer login no Instagram dentro desse Chrome.
-    """
-    import sys
-    base = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).parent
-    profile = base / "zf_chrome_ig"
-    profile.mkdir(parents=True, exist_ok=True)
-    return str(profile)
-
-
 class InstagramLoginError(RuntimeError):
     """Usuário não está logado no Instagram."""
 
@@ -45,23 +32,37 @@ class InstagramDMError(RuntimeError):
     """Erro ao enviar mensagem."""
 
 
-# Seletores do botão "Mensagem" no perfil (múltiplos para suportar variações do IG)
+# Seletores para o botão de mensagem — cobre todas as variações do Instagram
+# (Mensagem / Message / Enviar mensagem / Send message)
 _BTN_XPATHS = [
+    # Texto exato "Enviar mensagem" (visto na screenshot)
+    "//button[.//div[text()='Enviar mensagem']]",
+    "//button[div[text()='Enviar mensagem']]",
+    "//button[contains(.,'Enviar mensagem')]",
+    # Texto "Send message" (inglês)
+    "//button[contains(.,'Send message')]",
+    # Texto só "Mensagem"
     "//button[.//div[text()='Mensagem']]",
-    "//button[.//div[text()='Message']]",
     "//button[div[text()='Mensagem']]",
+    # Texto só "Message"
+    "//button[.//div[text()='Message']]",
     "//button[div[text()='Message']]",
-    "//*[@role='button'][.//span[text()='Mensagem']]",
-    "//*[@role='button'][.//span[text()='Message']]",
-    "//button[contains(@class,'_acan')][.//div[contains(text(),'ensagem')]]",
+    # Via role=button e span
+    "//*[@role='button'][.//span[contains(.,'ensagem')]]",
+    "//*[@role='button'][.//span[contains(.,'essage')]]",
+    # Genérico — qualquer botão contendo "mensagem" ou "message"
+    "//button[contains(translate(.,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'mensagem')]",
+    "//button[contains(translate(.,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'message')]",
 ]
 
-# Seletores do campo de texto no DM
+# Seletores para o campo de texto do DM
 _INPUT_CSS = [
     "div[aria-label='Mensagem']",
     "div[aria-label='Message']",
+    "div[aria-label='Enviar mensagem...']",
+    "div[aria-label='Send message...']",
+    "div[contenteditable='true'][role='textbox']",
     "div[contenteditable='true'][tabindex='0']",
-    "div[role='textbox'][contenteditable='true']",
 ]
 
 
@@ -71,17 +72,13 @@ def chrome_profile_padrao() -> str:
 
 def criar_driver(chrome_user_data: str | None = None,
                  profile_dir: str = "Default") -> webdriver.Chrome:
-    """
-    Cria driver Chrome usando perfil exclusivo do ZapFlow.
-    Isso evita o erro 'session not created' causado pelo Chrome já estar aberto
-    com o mesmo perfil do usuário.
-    """
+    """Cria driver Chrome usando o perfil do usuário para manter login do Instagram."""
     opts = webdriver.ChromeOptions()
 
-    # Usa o perfil exclusivo do ZapFlow (nunca conflita com Chrome aberto)
-    data_dir = chrome_user_data if chrome_user_data else chrome_profile_zapflow()
-    opts.add_argument(f"--user-data-dir={data_dir}")
-    opts.add_argument(f"--profile-directory={profile_dir}")
+    data_dir = chrome_user_data or chrome_profile_padrao()
+    if Path(data_dir).exists():
+        opts.add_argument(f"--user-data-dir={data_dir}")
+        opts.add_argument(f"--profile-directory={profile_dir}")
 
     opts.add_argument("--disable-blink-features=AutomationControlled")
     opts.add_argument("--disable-notifications")
@@ -122,24 +119,25 @@ def _abrir_dm(driver: webdriver.Chrome, username: str) -> None:
     if "Page Not Found" in driver.title or "não encontrada" in driver.page_source[:500]:
         raise InstagramUserNotFound(f"Perfil @{username} não encontrado.")
 
-    # Tenta cada seletor até encontrar o botão de Mensagem
+    # Tenta cada seletor até encontrar o botão de mensagem
     clicou = False
     for xpath in _BTN_XPATHS:
         try:
-            btn = WebDriverWait(driver, 5).until(
+            btn = WebDriverWait(driver, 4).until(
                 EC.element_to_be_clickable((By.XPATH, xpath))
             )
+            logger.info("Botao encontrado com seletor: %s", xpath)
             btn.click()
             clicou = True
-            logger.info("Botao Mensagem clicado para @%s", username)
+            logger.info("Botao de mensagem clicado para @%s", username)
             break
         except TimeoutException:
             continue
 
     if not clicou:
         raise InstagramDMError(
-            f"Botão 'Mensagem' não encontrado para @{username}.\n"
-            "Verifique se você e o usuário se seguem mutuamente."
+            f"Botão de mensagem não encontrado para @{username}.\n"
+            "Certifique-se de que vocês se seguem mutuamente no Instagram."
         )
 
     time.sleep(random.uniform(2.0, 3.5))
