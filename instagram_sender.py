@@ -1,253 +1,273 @@
-"""Envio de mensagens diretas via Instagram Web usando Selenium."""
+"""
+Envio de DMs via app do Instagram para Windows (pyautogui).
+Usa o app nativo instalado via Microsoft Store — sem Chrome, sem Selenium.
+"""
 
 from __future__ import annotations
 
+import ctypes
 import logging
+import os
 import random
 import time
 from pathlib import Path
 
-from selenium import webdriver
-from selenium.common.exceptions import TimeoutException
-from selenium.webdriver.common.action_chains import ActionChains
-from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.support.ui import WebDriverWait
+import pyautogui
+import pygetwindow as gw
 
 logger = logging.getLogger("instagram_sender")
 
-_WAIT = 12
+pyautogui.FAILSAFE = False
 
+
+# ─── Erros ────────────────────────────────────────────────────────────────────
 
 class InstagramLoginError(RuntimeError):
-    """Usuário não está logado no Instagram."""
-
+    pass
 
 class InstagramUserNotFound(RuntimeError):
-    """Perfil não encontrado."""
-
+    pass
 
 class InstagramDMError(RuntimeError):
-    """Erro ao enviar mensagem."""
+    pass
 
 
-# Seletores para o botão de mensagem — cobre todas as variações do Instagram
-# (Mensagem / Message / Enviar mensagem / Send message)
-_BTN_XPATHS = [
-    # Texto exato "Enviar mensagem" (visto na screenshot)
-    "//button[.//div[text()='Enviar mensagem']]",
-    "//button[div[text()='Enviar mensagem']]",
-    "//button[contains(.,'Enviar mensagem')]",
-    # Texto "Send message" (inglês)
-    "//button[contains(.,'Send message')]",
-    # Texto só "Mensagem"
-    "//button[.//div[text()='Mensagem']]",
-    "//button[div[text()='Mensagem']]",
-    # Texto só "Message"
-    "//button[.//div[text()='Message']]",
-    "//button[div[text()='Message']]",
-    # Via role=button e span
-    "//*[@role='button'][.//span[contains(.,'ensagem')]]",
-    "//*[@role='button'][.//span[contains(.,'essage')]]",
-    # Genérico — qualquer botão contendo "mensagem" ou "message"
-    "//button[contains(translate(.,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'mensagem')]",
-    "//button[contains(translate(.,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'message')]",
-]
+# ─── Win32: forçar foco ───────────────────────────────────────────────────────
 
-# Seletores para o campo de texto do DM
-_INPUT_CSS = [
-    "div[aria-label='Mensagem']",
-    "div[aria-label='Message']",
-    "div[aria-label='Enviar mensagem...']",
-    "div[aria-label='Send message...']",
-    "div[contenteditable='true'][role='textbox']",
-    "div[contenteditable='true'][tabindex='0']",
-]
+def _force_focus(hwnd: int) -> None:
+    user32   = ctypes.windll.user32
+    kernel32 = ctypes.windll.kernel32
+    curr     = kernel32.GetCurrentThreadId()
+    target   = user32.GetWindowThreadProcessId(hwnd, None)
+    if curr != target:
+        user32.AttachThreadInput(curr, target, True)
+    user32.ShowWindow(hwnd, 9)
+    user32.BringWindowToTop(hwnd)
+    user32.SetForegroundWindow(hwnd)
+    if curr != target:
+        user32.AttachThreadInput(curr, target, False)
 
 
-def chrome_profile_padrao() -> str:
-    return str(Path.home() / "AppData" / "Local" / "Google" / "Chrome" / "User Data")
+def _get_instagram_window():
+    wins = gw.getWindowsWithTitle("Instagram")
+    return wins[0] if wins else None
 
 
-_DEBUG_PORT = 9222
+def _focus_instagram_window() -> None:
+    w = _get_instagram_window()
+    if not w:
+        return
+    hwnd = ctypes.windll.user32.FindWindowW(None, "Instagram")
+    if hwnd:
+        _force_focus(hwnd)
+    time.sleep(0.5)
 
 
-def _find_chrome_exe() -> str:
-    """Localiza o executável do Chrome no Windows."""
-    candidates = [
-        Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
-        Path(r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"),
-        Path.home() / "AppData" / "Local" / "Google" / "Chrome" / "Application" / "chrome.exe",
-    ]
-    for c in candidates:
-        if c.exists():
-            return str(c)
-    raise FileNotFoundError(
-        "Google Chrome não encontrado.\nInstale o Chrome e tente novamente."
-    )
+# ─── Abrir app ────────────────────────────────────────────────────────────────
+
+def abrir_app_instagram() -> None:
+    """Abre o app do Instagram se não estiver aberto."""
+    if _get_instagram_window():
+        _focus_instagram_window()
+        return
+    os.startfile("instagram://")
+    for _ in range(15):
+        time.sleep(1)
+        if _get_instagram_window():
+            break
+    _focus_instagram_window()
+    time.sleep(2)
 
 
-def fechar_chrome() -> None:
-    """Fecha todos os processos do Chrome via taskkill."""
-    import subprocess
-    subprocess.run(["taskkill", "/F", "/IM", "chrome.exe"],
-                   capture_output=True, timeout=10)
-    time.sleep(3.0)
+# ─── Navegar para perfil ──────────────────────────────────────────────────────
 
-
-def _limpar_locks(data_dir: str, profile_dir: str = "Default") -> None:
-    """Remove lock files que impedem Chrome de abrir com o mesmo perfil."""
-    for lock in [
-        Path(data_dir) / "SingletonLock",
-        Path(data_dir) / "SingletonCookie",
-        Path(data_dir) / "SingletonSocket",
-        Path(data_dir) / profile_dir / "lockfile",
-    ]:
-        try:
-            if lock.exists():
-                lock.unlink()
-        except Exception:
-            pass
-
-
-def criar_driver(chrome_user_data: str | None = None,
-                 profile_dir: str = "Default") -> webdriver.Chrome:
+def _navegar_para_usuario(username: str) -> None:
     """
-    Abre o Chrome via subprocess com porta de debug fixa e conecta via
-    debuggerAddress. Isso evita todos os erros de 'session not created'
-    porque o Selenium se CONECTA ao Chrome já aberto em vez de criá-lo.
+    Navega para o perfil de um usuário via URI scheme do app.
+    instagram://user?username=XXXX abre o perfil direto no app.
     """
-    import subprocess
+    username = username.lstrip("@").strip()
+    _focus_instagram_window()
+    time.sleep(0.5)
 
-    data_dir = chrome_user_data or chrome_profile_padrao()
-    chrome   = _find_chrome_exe()
-
-    # 1. Fechar Chrome existente e limpar locks
-    fechar_chrome()
-    if Path(data_dir).exists():
-        _limpar_locks(data_dir, profile_dir)
+    # Tenta URI scheme direto
+    os.startfile(f"instagram://user?username={username}")
+    time.sleep(4.0)
+    _focus_instagram_window()
     time.sleep(1.0)
 
-    # 2. Abrir Chrome com porta de debug conhecida
-    cmd = [
-        chrome,
-        f"--remote-debugging-port={_DEBUG_PORT}",
-        f"--user-data-dir={data_dir}",
-        f"--profile-directory={profile_dir}",
-        "--no-first-run",
-        "--no-default-browser-check",
-        "--disable-notifications",
-        "--start-maximized",
-    ]
-    subprocess.Popen(cmd)
-    logger.info("Chrome iniciado com porta de debug %s", _DEBUG_PORT)
-    time.sleep(4.0)  # aguarda Chrome carregar completamente
 
-    # 3. Conectar ao Chrome já aberto via debuggerAddress
-    opts = webdriver.ChromeOptions()
-    opts.add_experimental_option("debuggerAddress", f"127.0.0.1:{_DEBUG_PORT}")
+# ─── Clicar no botão Mensagem ─────────────────────────────────────────────────
 
-    driver = webdriver.Chrome(options=opts)
-    driver.execute_script(
-        "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+def _clicar_botao_mensagem() -> bool:
+    """
+    Clica no botão 'Mensagem' ou 'Enviar mensagem' no perfil.
+    Tenta múltiplas posições Y pois o layout pode variar.
+    Layout típico do app:
+      - Foto + nome na parte de cima
+      - Botões Seguir / Mensagem logo abaixo (~380-420px do topo)
+    """
+    w = _get_instagram_window()
+    if not w:
+        raise InstagramDMError("App do Instagram não encontrado.")
+
+    # X: ~60% da largura total (botão Mensagem fica à direita do Seguir)
+    x = w.left + int(w.width * 0.60)
+
+    # Tenta diferentes posições Y
+    for y_offset in [390, 375, 405, 360, 420, 440]:
+        y = w.top + y_offset
+        pyautogui.click(x, y)
+        time.sleep(2.0)
+
+        # Verifica se o campo de DM apareceu (campo de texto no rodapé)
+        if _encontrar_input_dm(w, verificar=True):
+            logger.info("Botao mensagem clicado em y=%d", y_offset)
+            return True
+
+    raise InstagramDMError(
+        "Botão 'Mensagem' não encontrado no perfil.\n"
+        "Verifique se você e o usuário se seguem mutuamente."
     )
-    return driver
 
 
-def verificar_login(driver: webdriver.Chrome) -> None:
-    """Abre o Instagram e verifica se o usuário está logado."""
-    driver.get("https://www.instagram.com/")
-    time.sleep(3)
-    url = driver.current_url
-    if "login" in url or "accounts/login" in url:
-        raise InstagramLoginError(
-            "Você não está logado no Instagram.\n"
-            "Abra o Chrome normalmente, faça login no Instagram e tente novamente."
-        )
-    logger.info("Login verificado com sucesso.")
+# ─── Campo de texto do DM ─────────────────────────────────────────────────────
 
+def _encontrar_input_dm(w=None, verificar: bool = False):
+    """
+    O campo de texto do DM fica no rodapé do chat.
+    Clica nele para garantir foco.
+    """
+    if w is None:
+        w = _get_instagram_window()
+    if not w:
+        return False
 
-def _abrir_dm(driver: webdriver.Chrome, username: str) -> None:
-    """Navega até o perfil e clica no botão de Mensagem."""
-    username = username.lstrip("@").strip()
-    wait     = WebDriverWait(driver, _WAIT)
+    x = w.left + int(w.width * 0.5)
+    y = w.top + w.height - 70   # ~70px acima do rodapé
 
-    driver.get(f"https://www.instagram.com/{username}/")
-    time.sleep(random.uniform(2.5, 4.0))
-
-    if "Page Not Found" in driver.title or "não encontrada" in driver.page_source[:500]:
-        raise InstagramUserNotFound(f"Perfil @{username} não encontrado.")
-
-    # Tenta cada seletor até encontrar o botão de mensagem
-    clicou = False
-    for xpath in _BTN_XPATHS:
+    if verificar:
+        # Faz um screenshot pequeno na região do input
+        # Se tiver área escura/caixa de texto, assumimos que abriu
         try:
-            btn = WebDriverWait(driver, 4).until(
-                EC.element_to_be_clickable((By.XPATH, xpath))
-            )
-            logger.info("Botao encontrado com seletor: %s", xpath)
-            btn.click()
-            clicou = True
-            logger.info("Botao de mensagem clicado para @%s", username)
-            break
-        except TimeoutException:
-            continue
+            shot = pyautogui.screenshot(region=(w.left + 200, w.top + w.height - 120,
+                                                 w.width - 300, 80))
+            pixels = list(shot.getdata())
+            # Área de input tem fundo mais escuro que o restante
+            dark = sum(1 for r, g, b in pixels if r < 60 and g < 60 and b < 60)
+            if dark / len(pixels) > 0.1:
+                pyautogui.click(x, y)
+                time.sleep(0.5)
+                return True
+        except Exception:
+            pass
+        return False
 
-    if not clicou:
-        raise InstagramDMError(
-            f"Botão de mensagem não encontrado para @{username}.\n"
-            "Certifique-se de que vocês se seguem mutuamente no Instagram."
-        )
-
-    time.sleep(random.uniform(2.0, 3.5))
+    pyautogui.click(x, y)
+    time.sleep(0.5)
+    return True
 
 
-def _digitar_e_enviar(driver: webdriver.Chrome, texto: str) -> None:
-    """Digita uma mensagem no campo de DM e envia."""
-    campo = None
-    for css in _INPUT_CSS:
-        try:
-            campo = WebDriverWait(driver, _WAIT).until(
-                EC.element_to_be_clickable((By.CSS_SELECTOR, css))
-            )
-            break
-        except TimeoutException:
-            continue
+# ─── Digitar e enviar ─────────────────────────────────────────────────────────
 
-    if campo is None:
-        raise InstagramDMError("Campo de mensagem do DM não encontrado.")
+# Estruturas Win32 para envio de unicode via SendInput
+class _KEYBDINPUT(ctypes.Structure):
+    _fields_ = [
+        ("wVk",         ctypes.c_ushort),
+        ("wScan",       ctypes.c_ushort),
+        ("dwFlags",     ctypes.c_ulong),
+        ("time",        ctypes.c_ulong),
+        ("dwExtraInfo", ctypes.c_uint64),
+    ]
 
-    campo.click()
-    time.sleep(random.uniform(0.4, 0.9))
+class _INPUT_UNION(ctypes.Union):
+    _fields_ = [("ki", _KEYBDINPUT), ("_pad", ctypes.c_byte * 28)]
 
-    # Digita caractere por caractere com velocidade humana
-    actions = ActionChains(driver)
-    for char in texto:
-        actions.send_keys(char)
-        actions.pause(random.uniform(0.04, 0.15))
-    actions.perform()
+class _INPUT(ctypes.Structure):
+    _fields_ = [("type", ctypes.c_ulong), ("u", _INPUT_UNION)]
 
+_KEYEVENTF_UNICODE = 0x0004
+_KEYEVENTF_KEYUP   = 0x0002
+_INPUT_KEYBOARD    = 1
+
+
+def _send_char(code: int) -> None:
+    if code > 0xFFFF:
+        code -= 0x10000
+        _send_scan(0xD800 | (code >> 10))
+        _send_scan(0xDC00 | (code & 0x3FF))
+    else:
+        _send_scan(code)
+
+
+def _send_scan(scan: int) -> None:
+    for flags in (_KEYEVENTF_UNICODE, _KEYEVENTF_UNICODE | _KEYEVENTF_KEYUP):
+        inp = _INPUT()
+        inp.type        = _INPUT_KEYBOARD
+        inp.u.ki.wScan  = scan
+        inp.u.ki.dwFlags = flags
+        ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(_INPUT))
+
+
+def _digitar_texto(texto: str) -> None:
+    """Digita o texto caractere por caractere (comportamento humano)."""
     time.sleep(random.uniform(0.5, 1.2))
-    campo.send_keys(Keys.RETURN)
-    time.sleep(random.uniform(1.5, 3.0))
+    for char in texto:
+        if char == "\n":
+            pyautogui.hotkey("shift", "enter")
+            time.sleep(random.uniform(0.2, 0.4))
+            continue
+        _send_char(ord(char))
+        if char in ".!?":
+            time.sleep(random.uniform(0.2, 0.6))
+        elif char == " ":
+            time.sleep(random.uniform(0.05, 0.15))
+        else:
+            time.sleep(random.uniform(0.04, 0.14))
+        if random.random() < 0.03:
+            time.sleep(random.uniform(0.4, 1.2))
+    time.sleep(random.uniform(0.6, 1.8))
+    pyautogui.press("enter")
 
+
+# ─── Função principal ─────────────────────────────────────────────────────────
 
 def enviar_instagram(
     username: str,
     messages: list[str],
-    driver: webdriver.Chrome,
     progress_callback=None,
 ) -> int:
-    """Envia lista de mensagens para um usuário via DM do Instagram."""
-    _abrir_dm(driver, username)
+    """
+    Abre o perfil do usuário no app do Instagram,
+    clica em Mensagem e envia os blocos de texto.
+    """
+    username = username.lstrip("@").strip()
+    logger.info("Navegando para @%s", username)
 
+    # 1. Garante que o app está aberto
+    abrir_app_instagram()
+
+    # 2. Navega para o perfil
+    _navegar_para_usuario(username)
+
+    # 3. Clica no botão Mensagem
+    _clicar_botao_mensagem()
+
+    # 4. Garante foco no input do DM
+    w = _get_instagram_window()
+    _encontrar_input_dm(w)
+
+    # 5. Envia cada bloco
     for idx, msg in enumerate(messages, start=1):
         if progress_callback:
             progress_callback(idx, len(messages), msg)
-        _digitar_e_enviar(driver, msg)
+
+        _focus_instagram_window()
+        _encontrar_input_dm(w)
+        _digitar_texto(msg)
+
         if idx < len(messages):
             time.sleep(random.uniform(2.0, 5.0))
 
-    logger.info("Envio concluido para @%s (%d mensagens)", username, len(messages))
+    logger.info("Envio concluido para @%s (%d msgs)", username, len(messages))
     return len(messages)
