@@ -1,6 +1,6 @@
 """
 Envio de DMs via app do Instagram para Windows (pyautogui).
-Usa o app nativo instalado via Microsoft Store — sem Chrome, sem Selenium.
+Fluxo: lupa → pesquisa → primeiro resultado → Enviar mensagem → digitar no modal.
 """
 
 from __future__ import annotations
@@ -10,13 +10,12 @@ import logging
 import os
 import random
 import time
-from pathlib import Path
 
 import pyautogui
 import pygetwindow as gw
+import pyperclip
 
 logger = logging.getLogger("instagram_sender")
-
 pyautogui.FAILSAFE = False
 
 
@@ -32,13 +31,16 @@ class InstagramDMError(RuntimeError):
     pass
 
 
-# ─── Win32: forçar foco ───────────────────────────────────────────────────────
+# ─── Win32: forçar foco na janela ────────────────────────────────────────────
 
-def _force_focus(hwnd: int) -> None:
+def _force_focus_ig() -> None:
+    hwnd = ctypes.windll.user32.FindWindowW(None, "Instagram")
+    if not hwnd:
+        return
     user32   = ctypes.windll.user32
     kernel32 = ctypes.windll.kernel32
-    curr     = kernel32.GetCurrentThreadId()
-    target   = user32.GetWindowThreadProcessId(hwnd, None)
+    curr   = kernel32.GetCurrentThreadId()
+    target = user32.GetWindowThreadProcessId(hwnd, None)
     if curr != target:
         user32.AttachThreadInput(curr, target, True)
     user32.ShowWindow(hwnd, 9)
@@ -46,131 +48,113 @@ def _force_focus(hwnd: int) -> None:
     user32.SetForegroundWindow(hwnd)
     if curr != target:
         user32.AttachThreadInput(curr, target, False)
+    time.sleep(0.4)
 
 
-def _get_instagram_window():
+def _get_win():
     wins = gw.getWindowsWithTitle("Instagram")
     return wins[0] if wins else None
 
 
-def _focus_instagram_window() -> None:
-    w = _get_instagram_window()
-    if not w:
-        return
-    hwnd = ctypes.windll.user32.FindWindowW(None, "Instagram")
-    if hwnd:
-        _force_focus(hwnd)
-    time.sleep(0.5)
+def _click(w, x_pct: float, y_pct: float, wait: float = 1.0) -> None:
+    """Clica em posição relativa (%) dentro da janela do Instagram."""
+    x = w.left + int(w.width  * x_pct)
+    y = w.top  + int(w.height * y_pct)
+    _force_focus_ig()
+    pyautogui.click(x, y)
+    if wait > 0:
+        time.sleep(wait)
 
 
 # ─── Abrir app ────────────────────────────────────────────────────────────────
 
 def abrir_app_instagram() -> None:
-    """Abre o app do Instagram se não estiver aberto."""
-    if _get_instagram_window():
-        _focus_instagram_window()
+    if _get_win():
+        _force_focus_ig()
         return
     os.startfile("instagram://")
     for _ in range(15):
         time.sleep(1)
-        if _get_instagram_window():
+        if _get_win():
             break
-    _focus_instagram_window()
+    _force_focus_ig()
     time.sleep(2)
 
 
-# ─── Navegar para perfil ──────────────────────────────────────────────────────
+# ─── Passo 1: Clicar na lupa da sidebar ──────────────────────────────────────
 
-def _navegar_para_usuario(username: str) -> None:
+def _clicar_lupa() -> None:
     """
-    Navega para o perfil de um usuário via URI scheme do app.
-    instagram://user?username=XXXX abre o perfil direto no app.
+    Clica no ícone de pesquisa (lupa) na sidebar esquerda.
+    Posição: x ≈ 3.4% da largura, y ≈ 43% da altura.
+    (5º ícone de cima para baixo na sidebar estreita)
     """
-    username = username.lstrip("@").strip()
-    _focus_instagram_window()
-    time.sleep(0.5)
-
-    # Tenta URI scheme direto
-    os.startfile(f"instagram://user?username={username}")
-    time.sleep(4.0)
-    _focus_instagram_window()
-    time.sleep(1.0)
-
-
-# ─── Clicar no botão Mensagem ─────────────────────────────────────────────────
-
-def _clicar_botao_mensagem() -> bool:
-    """
-    Clica no botão 'Mensagem' ou 'Enviar mensagem' no perfil.
-    Tenta múltiplas posições Y pois o layout pode variar.
-    Layout típico do app:
-      - Foto + nome na parte de cima
-      - Botões Seguir / Mensagem logo abaixo (~380-420px do topo)
-    """
-    w = _get_instagram_window()
+    w = _get_win()
     if not w:
         raise InstagramDMError("App do Instagram não encontrado.")
-
-    # X: ~60% da largura total (botão Mensagem fica à direita do Seguir)
-    x = w.left + int(w.width * 0.60)
-
-    # Tenta diferentes posições Y
-    for y_offset in [390, 375, 405, 360, 420, 440]:
-        y = w.top + y_offset
-        pyautogui.click(x, y)
-        time.sleep(2.0)
-
-        # Verifica se o campo de DM apareceu (campo de texto no rodapé)
-        if _encontrar_input_dm(w, verificar=True):
-            logger.info("Botao mensagem clicado em y=%d", y_offset)
-            return True
-
-    raise InstagramDMError(
-        "Botão 'Mensagem' não encontrado no perfil.\n"
-        "Verifique se você e o usuário se seguem mutuamente."
-    )
+    logger.info("Clicando na lupa da sidebar")
+    _click(w, 0.034, 0.43, wait=2.0)
 
 
-# ─── Campo de texto do DM ─────────────────────────────────────────────────────
+# ─── Passo 2: Digitar no campo de pesquisa ───────────────────────────────────
 
-def _encontrar_input_dm(w=None, verificar: bool = False):
+def _pesquisar_usuario(username: str) -> None:
     """
-    O campo de texto do DM fica no rodapé do chat.
-    Clica nele para garantir foco.
+    Clica no input de pesquisa (topo da tela após clicar na lupa)
+    e digita o username.
+    Input de pesquisa: x ≈ 50%, y ≈ 11%.
     """
-    if w is None:
-        w = _get_instagram_window()
-    if not w:
-        return False
+    w = _get_win()
+    logger.info("Clicando no campo de pesquisa")
+    _click(w, 0.50, 0.108, wait=0.5)
 
-    x = w.left + int(w.width * 0.5)
-    y = w.top + w.height - 70   # ~70px acima do rodapé
-
-    if verificar:
-        # Faz um screenshot pequeno na região do input
-        # Se tiver área escura/caixa de texto, assumimos que abriu
-        try:
-            shot = pyautogui.screenshot(region=(w.left + 200, w.top + w.height - 120,
-                                                 w.width - 300, 80))
-            pixels = list(shot.getdata())
-            # Área de input tem fundo mais escuro que o restante
-            dark = sum(1 for r, g, b in pixels if r < 60 and g < 60 and b < 60)
-            if dark / len(pixels) > 0.1:
-                pyautogui.click(x, y)
-                time.sleep(0.5)
-                return True
-        except Exception:
-            pass
-        return False
-
-    pyautogui.click(x, y)
-    time.sleep(0.5)
-    return True
+    # Limpa e digita o username
+    pyautogui.hotkey("ctrl", "a")
+    time.sleep(0.2)
+    pyperclip.copy(username)
+    pyautogui.hotkey("ctrl", "v")
+    logger.info("Username digitado: %s", username)
+    time.sleep(2.5)   # aguarda resultados aparecerem
 
 
-# ─── Digitar e enviar ─────────────────────────────────────────────────────────
+# ─── Passo 3: Clicar no primeiro resultado ────────────────────────────────────
 
-# Estruturas Win32 para envio de unicode via SendInput
+def _clicar_primeiro_resultado() -> None:
+    """
+    Clica no primeiro perfil que aparece na lista de resultados.
+    Primeiro resultado: x ≈ 50%, y ≈ 24%.
+    """
+    w = _get_win()
+    logger.info("Clicando no primeiro resultado")
+    _click(w, 0.50, 0.244, wait=3.0)  # aguarda perfil carregar
+
+
+# ─── Passo 4: Clicar em "Enviar mensagem" ────────────────────────────────────
+
+def _clicar_enviar_mensagem() -> None:
+    """
+    Clica no botão 'Enviar mensagem' na página do perfil.
+    Botão: x ≈ 57%, y ≈ 60%.
+    """
+    w = _get_win()
+    logger.info("Clicando em 'Enviar mensagem'")
+    _click(w, 0.57, 0.60, wait=2.0)   # aguarda modal do DM abrir
+
+
+# ─── Passo 5: Clicar no input do modal e escrever ────────────────────────────
+
+def _clicar_input_modal() -> None:
+    """
+    O modal de DM aparece no canto direito.
+    Input de mensagem: x ≈ 79%, y ≈ 87%.
+    """
+    w = _get_win()
+    logger.info("Clicando no input do modal DM")
+    _click(w, 0.79, 0.875, wait=0.5)
+
+
+# ─── Digitação humana via Windows SendInput ───────────────────────────────────
+
 class _KEYBDINPUT(ctypes.Structure):
     _fields_ = [
         ("wVk",         ctypes.c_ushort),
@@ -186,32 +170,32 @@ class _INPUT_UNION(ctypes.Union):
 class _INPUT(ctypes.Structure):
     _fields_ = [("type", ctypes.c_ulong), ("u", _INPUT_UNION)]
 
-_KEYEVENTF_UNICODE = 0x0004
-_KEYEVENTF_KEYUP   = 0x0002
-_INPUT_KEYBOARD    = 1
+_KF_UNICODE = 0x0004
+_KF_KEYUP   = 0x0002
+_KBD        = 1
 
 
 def _send_char(code: int) -> None:
     if code > 0xFFFF:
         code -= 0x10000
-        _send_scan(0xD800 | (code >> 10))
-        _send_scan(0xDC00 | (code & 0x3FF))
+        _raw(0xD800 | (code >> 10))
+        _raw(0xDC00 | (code & 0x3FF))
     else:
-        _send_scan(code)
+        _raw(code)
 
 
-def _send_scan(scan: int) -> None:
-    for flags in (_KEYEVENTF_UNICODE, _KEYEVENTF_UNICODE | _KEYEVENTF_KEYUP):
+def _raw(scan: int) -> None:
+    for flags in (_KF_UNICODE, _KF_UNICODE | _KF_KEYUP):
         inp = _INPUT()
-        inp.type        = _INPUT_KEYBOARD
-        inp.u.ki.wScan  = scan
+        inp.type         = _KBD
+        inp.u.ki.wScan   = scan
         inp.u.ki.dwFlags = flags
         ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(_INPUT))
 
 
-def _digitar_texto(texto: str) -> None:
-    """Digita o texto caractere por caractere (comportamento humano)."""
-    time.sleep(random.uniform(0.5, 1.2))
+def _digitar(texto: str) -> None:
+    """Digita o texto letra por letra (comportamento humano)."""
+    time.sleep(random.uniform(0.5, 1.0))
     for char in texto:
         if char == "\n":
             pyautogui.hotkey("shift", "enter")
@@ -219,14 +203,14 @@ def _digitar_texto(texto: str) -> None:
             continue
         _send_char(ord(char))
         if char in ".!?":
-            time.sleep(random.uniform(0.2, 0.6))
+            time.sleep(random.uniform(0.2, 0.5))
         elif char == " ":
             time.sleep(random.uniform(0.05, 0.15))
         else:
-            time.sleep(random.uniform(0.04, 0.14))
+            time.sleep(random.uniform(0.04, 0.13))
         if random.random() < 0.03:
-            time.sleep(random.uniform(0.4, 1.2))
-    time.sleep(random.uniform(0.6, 1.8))
+            time.sleep(random.uniform(0.4, 1.0))
+    time.sleep(random.uniform(0.6, 1.5))
     pyautogui.press("enter")
 
 
@@ -238,36 +222,45 @@ def enviar_instagram(
     progress_callback=None,
 ) -> int:
     """
-    Abre o perfil do usuário no app do Instagram,
-    clica em Mensagem e envia os blocos de texto.
+    Fluxo completo:
+    1. Clica na lupa da sidebar
+    2. Pesquisa o username
+    3. Clica no primeiro resultado
+    4. Clica em 'Enviar mensagem'
+    5. Clica no input do modal e digita as mensagens
     """
     username = username.lstrip("@").strip()
-    logger.info("Navegando para @%s", username)
+    logger.info("Iniciando envio para @%s", username)
 
-    # 1. Garante que o app está aberto
-    abrir_app_instagram()
+    w = _get_win()
+    if not w:
+        raise InstagramDMError("App do Instagram não está aberto.")
 
-    # 2. Navega para o perfil
-    _navegar_para_usuario(username)
+    # Passo 1 — Lupa
+    _clicar_lupa()
 
-    # 3. Clica no botão Mensagem
-    _clicar_botao_mensagem()
+    # Passo 2 — Pesquisar
+    _pesquisar_usuario(username)
 
-    # 4. Garante foco no input do DM
-    w = _get_instagram_window()
-    _encontrar_input_dm(w)
+    # Passo 3 — Primeiro resultado
+    _clicar_primeiro_resultado()
 
-    # 5. Envia cada bloco
+    # Passo 4 — Enviar mensagem
+    _clicar_enviar_mensagem()
+
+    # Passo 5 — Digitar no modal
+    _clicar_input_modal()
+
     for idx, msg in enumerate(messages, start=1):
         if progress_callback:
             progress_callback(idx, len(messages), msg)
 
-        _focus_instagram_window()
-        _encontrar_input_dm(w)
-        _digitar_texto(msg)
+        _force_focus_ig()
+        _clicar_input_modal()
+        _digitar(msg)
 
         if idx < len(messages):
-            time.sleep(random.uniform(2.0, 5.0))
+            time.sleep(random.uniform(2.0, 4.0))
 
-    logger.info("Envio concluido para @%s (%d msgs)", username, len(messages))
+    logger.info("Envio concluido para @%s", username)
     return len(messages)
