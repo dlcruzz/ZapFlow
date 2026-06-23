@@ -34,21 +34,18 @@ class InstagramDMError(RuntimeError):
 # ─── Win32: forçar foco na janela ────────────────────────────────────────────
 
 def _force_focus_ig() -> None:
+    """
+    Traz o Instagram para o foreground sem AttachThreadInput.
+    AttachThreadInput une filas de teclado e causa vazamento de eventos
+    do ZapFlow para o Instagram (abre barra de pesquisa, etc.).
+    """
     hwnd = ctypes.windll.user32.FindWindowW(None, "Instagram")
     if not hwnd:
         return
-    user32   = ctypes.windll.user32
-    kernel32 = ctypes.windll.kernel32
-    curr   = kernel32.GetCurrentThreadId()
-    target = user32.GetWindowThreadProcessId(hwnd, None)
-    if curr != target:
-        user32.AttachThreadInput(curr, target, True)
-    user32.ShowWindow(hwnd, 9)
-    user32.BringWindowToTop(hwnd)
-    user32.SetForegroundWindow(hwnd)
-    if curr != target:
-        user32.AttachThreadInput(curr, target, False)
-    time.sleep(0.4)
+    ctypes.windll.user32.ShowWindow(hwnd, 9)       # SW_RESTORE
+    ctypes.windll.user32.BringWindowToTop(hwnd)
+    ctypes.windll.user32.SetForegroundWindow(hwnd)
+    time.sleep(0.3)
 
 
 def _get_win():
