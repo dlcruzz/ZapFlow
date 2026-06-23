@@ -138,7 +138,6 @@ def criar_driver(chrome_user_data: str | None = None,
         "--no-first-run",
         "--no-default-browser-check",
         "--disable-notifications",
-        "--disable-blink-features=AutomationControlled",
         "--start-maximized",
     ]
     subprocess.Popen(cmd)
