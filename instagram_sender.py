@@ -191,35 +191,91 @@ def _regiao_mudou(antes: list, depois: list) -> bool:
     return avg > 15
 
 
+def _detectar_botao_mensagem(w) -> tuple[int, int] | None:
+    """
+    Detecta o botão 'Enviar mensagem' visualmente.
+
+    O botão tem texto BRANCO numa área escura. Escaneia a faixa onde ele
+    aparece (x=45-82%, y=33-63% da janela) e encontra a LINHA com mais
+    pixels brancos — essa linha é o texto do botão.
+    O Y é detectado dinamicamente (muda conforme o tamanho da bio).
+    O X é fixo no centro do botão (≈58% da largura).
+    """
+    try:
+        rx = w.left + int(w.width  * 0.45)
+        ry = w.top  + int(w.height * 0.33)
+        rw = int(w.width  * 0.37)
+        rh = int(w.height * 0.30)
+
+        shot = pyautogui.screenshot(region=(rx, ry, rw, rh))
+        arr  = shot.load()
+
+        max_white = 0
+        best_row  = -1
+
+        for row in range(rh):
+            white = sum(
+                1 for col in range(rw)
+                if arr[col, row][0] > 185
+                and arr[col, row][1] > 185
+                and arr[col, row][2] > 185
+            )
+            if white > max_white:
+                max_white = white
+                best_row  = row
+
+        if best_row < 0 or max_white < 6:
+            logger.warning("Botao 'Enviar mensagem' nao detectado (white=%d)", max_white)
+            return None
+
+        btn_x = w.left + int(w.width  * 0.58)   # centro fixo do botao
+        btn_y = ry + best_row                     # Y detectado dinamicamente
+
+        logger.info("Botao detectado: row=%d, white=%d -> (%d, %d)",
+                    best_row, max_white, btn_x, btn_y)
+        return btn_x, btn_y
+
+    except Exception as e:
+        logger.warning("Erro na deteccao visual: %s", e)
+        return None
+
+
 def _clicar_enviar_mensagem() -> None:
     """
-    Encontra e clica em 'Enviar mensagem'.
-    Usa comparação de screenshot antes/depois — se a região direita mudou,
-    o modal abriu. Não depende de coordenadas fixas de pixels.
+    1. Detecta o botão visualmente (texto branco na área do perfil)
+    2. Clica exatamente no botão detectado
+    3. Verifica se o modal abriu via comparação de screenshot
+    4. Fallback: testa posições Y se detecção visual falhar
     """
     w = _get_win()
-
-    # Estado inicial da região (posts do perfil = coloridos e variados)
     estado_inicial = _capturar_regiao_modal(w)
 
-    for y_pct in [0.50, 0.52, 0.48, 0.54, 0.46, 0.56, 0.44, 0.58, 0.60]:
-        # Verifica ANTES de clicar — modal pode ter aberto na tentativa anterior
+    # ── Tentativa 1: detecção visual ──────────────────────────────────────────
+    pos = _detectar_botao_mensagem(w)
+    if pos:
+        _force_focus_ig()
+        pyautogui.click(*pos)
+        time.sleep(2.5)
         if _regiao_mudou(estado_inicial, _capturar_regiao_modal(w)):
-            logger.info("Modal detectado ANTES do clique — parando")
+            logger.info("Modal aberto via deteccao visual")
+            return
+        pyautogui.press("escape")
+        time.sleep(0.5)
+
+    # ── Fallback: testa posições Y ────────────────────────────────────────────
+    for y_pct in [0.50, 0.52, 0.48, 0.54, 0.46, 0.56, 0.44, 0.58, 0.60]:
+        if _regiao_mudou(estado_inicial, _capturar_regiao_modal(w)):
             return
 
-        logger.info("Tentando 'Enviar mensagem' em y=%.2f", y_pct)
         _force_focus_ig()
         pyautogui.click(w.left + int(w.width * 0.57),
                         w.top  + int(w.height * y_pct))
         time.sleep(2.5)
 
-        # Verifica DEPOIS do clique
         if _regiao_mudou(estado_inicial, _capturar_regiao_modal(w)):
-            logger.info("Modal aberto apos clique em y=%.2f", y_pct)
+            logger.info("Modal aberto via fallback y=%.2f", y_pct)
             return
 
-        # Clique errado — fecha qualquer coisa que abriu e tenta próxima posição
         pyautogui.press("escape")
         time.sleep(0.6)
 
