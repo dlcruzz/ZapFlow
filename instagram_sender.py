@@ -323,29 +323,33 @@ def enviar_instagram(
     time.sleep(random.uniform(1.0, 2.0))
     _clicar_primeiro_resultado()
 
-    # Passo 4 — Enviar mensagem (pausa como se estivesse lendo o perfil)
+    # Passo 4 — Clica em "Enviar mensagem" (pausa como se lesse o perfil)
     time.sleep(random.uniform(1.5, 3.0))
     _clicar_enviar_mensagem()
 
-    # Após clicar em "Enviar mensagem" o input já está focado — sem clique extra
+    # Passo 5 — Clica no input da caixa de mensagem para ativá-la
     time.sleep(random.uniform(1.5, 2.5))
+    _clicar_input_modal()
+    time.sleep(random.uniform(0.5, 1.0))
 
+    # Passo 6 — Digita e envia todas as mensagens
     for idx, msg in enumerate(messages, start=1):
         if progress_callback:
             progress_callback(idx, len(messages), msg)
 
-        # Garante foco no Instagram antes de digitar
         _force_focus_ig()
-
-        # Pausa antes de digitar (simula leitura/pensamento)
-        time.sleep(random.uniform(0.8, 2.0))
+        time.sleep(random.uniform(0.6, 1.5))
         _digitar(msg)
 
-        # Delay anti-bloqueio entre mensagens do mesmo contato
         if idx < len(messages):
             pausa = random.uniform(4.0, 10.0)
             logger.info("Pausa entre mensagens: %.1fs", pausa)
             time.sleep(pausa)
 
-    logger.info("Envio concluido para @%s", username)
+    # Passo 7 — Volta ao Home antes do próximo contato
+    logger.info("Mensagens enviadas para @%s — voltando ao Home", username)
+    time.sleep(random.uniform(1.0, 2.0))
+    _fechar_modais()
+    _ir_para_home()
+
     return len(messages)
