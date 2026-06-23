@@ -164,40 +164,48 @@ def _clicar_primeiro_resultado() -> None:
 
 # ─── Passo 4: Clicar em "Enviar mensagem" ────────────────────────────────────
 
-def _modal_dm_aberto(w) -> bool:
-    """
-    Verifica se o modal DM abriu checando dois pontos:
-    1. Botão X de fechar (top-right do modal: x≈93%, y≈19%)
-    2. Área do input "Mensagem..." (bottom-right: x≈68%, y≈91%)
-    """
+def _capturar_regiao_modal(w) -> list:
+    """Captura pixels da região onde o modal DM aparece (lado direito)."""
     try:
-        regioes = [
-            (int(w.width * 0.93), int(w.height * 0.19), 65, 40),   # botão X
-            (int(w.width * 0.66), int(w.height * 0.91), 200, 35),  # input
-        ]
-        for dx, dy, rw, rh in regioes:
-            shot   = pyautogui.screenshot(region=(w.left + dx, w.top + dy, rw, rh))
-            pixels = list(shot.getdata())
-            light  = sum(1 for r, g, b in pixels if r > 130 and g > 130 and b > 130)
-            if (light / len(pixels)) > 0.06:
-                return True
-        return False
+        rx = w.left + int(w.width  * 0.63)
+        ry = w.top  + int(w.height * 0.15)
+        rw = int(w.width  * 0.35)
+        rh = int(w.height * 0.72)
+        return list(pyautogui.screenshot(region=(rx, ry, rw, rh)).getdata())
     except Exception:
+        return []
+
+
+def _regiao_mudou(antes: list, depois: list) -> bool:
+    """
+    Compara dois screenshots pixel a pixel.
+    Se a diferença média for > 15 por canal, houve mudança visual significativa
+    (o modal abriu — a região de posts foi substituída pelo painel de chat).
+    """
+    if not antes or not depois or len(antes) != len(depois):
         return False
+    total = sum(abs(a[0]-b[0]) + abs(a[1]-b[1]) + abs(a[2]-b[2])
+                for a, b in zip(antes, depois))
+    avg = total / len(antes) / 3
+    logger.info("Diferenca visual: %.1f (>15 = modal abriu)", avg)
+    return avg > 15
 
 
 def _clicar_enviar_mensagem() -> None:
     """
-    Encontra o botão 'Enviar mensagem' testando posições Y.
-    — Verifica ANTES de cada clique se o modal já abriu (para não clicar dentro dele)
-    — Pressiona Escape entre tentativas para fechar qualquer coisa que abriu por engano
+    Encontra e clica em 'Enviar mensagem'.
+    Usa comparação de screenshot antes/depois — se a região direita mudou,
+    o modal abriu. Não depende de coordenadas fixas de pixels.
     """
     w = _get_win()
 
+    # Estado inicial da região (posts do perfil = coloridos e variados)
+    estado_inicial = _capturar_regiao_modal(w)
+
     for y_pct in [0.50, 0.52, 0.48, 0.54, 0.46, 0.56, 0.44, 0.58, 0.60]:
-        # Se o modal já está aberto de uma tentativa anterior, para imediatamente
-        if _modal_dm_aberto(w):
-            logger.info("Modal ja aberto — parando loop")
+        # Verifica ANTES de clicar — modal pode ter aberto na tentativa anterior
+        if _regiao_mudou(estado_inicial, _capturar_regiao_modal(w)):
+            logger.info("Modal detectado ANTES do clique — parando")
             return
 
         logger.info("Tentando 'Enviar mensagem' em y=%.2f", y_pct)
@@ -206,20 +214,19 @@ def _clicar_enviar_mensagem() -> None:
                         w.top  + int(w.height * y_pct))
         time.sleep(2.5)
 
-        if _modal_dm_aberto(w):
+        # Verifica DEPOIS do clique
+        if _regiao_mudou(estado_inicial, _capturar_regiao_modal(w)):
             logger.info("Modal aberto apos clique em y=%.2f", y_pct)
             return
 
-        # Clicou em lugar errado — fecha o que abriu antes da próxima tentativa
+        # Clique errado — fecha qualquer coisa que abriu e tenta próxima posição
         pyautogui.press("escape")
-        time.sleep(0.5)
+        time.sleep(0.6)
 
-    time.sleep(1.0)
-    if not _modal_dm_aberto(w):
-        raise InstagramDMError(
-            "Botao 'Enviar mensagem' nao encontrado.\n"
-            "Verifique se voce e o usuario se seguem mutuamente."
-        )   # aguarda modal do DM abrir
+    raise InstagramDMError(
+        "Botao 'Enviar mensagem' nao encontrado.\n"
+        "Verifique se voce e o usuario se seguem mutuamente."
+    )   # aguarda modal do DM abrir
 
 
 # ─── Passo 5: Clicar no input do modal e escrever ────────────────────────────
